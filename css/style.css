@@ -33,21 +33,27 @@ h1{font-size:18px;margin:0}
 @media (max-width:900px){ .stage-col{position:static} }
 .dropzone{border:2px dashed transparent;border-radius:var(--radius);transition:border-color .15s,background .15s}
 .dropzone.drag{border-color:var(--accent-2);background:rgba(79,140,255,.06)}
-.stage-wrap{position:relative;width:100%;aspect-ratio:16/9;border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);background:#000}
+.stage-wrap{position:relative;width:100%;aspect-ratio:16/9;border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);background:#000;margin:0 auto}
 .stage{position:absolute;inset:0}
-.stage-bg{position:absolute;inset:0;background:#101216 center/cover no-repeat}
-.cap-layer{position:absolute;inset:0;display:flex;padding:0}
-.cap-box{max-width:84%;white-space:pre-wrap;word-break:break-word}
-.empty-hint{
-  position:absolute;inset:0;margin:auto;display:flex;align-items:center;justify-content:center;
-  text-align:center;padding:24px;color:#c9d2e0;font-size:15px;line-height:1.7;pointer-events:none;
+.stage-bg{position:absolute;inset:0;z-index:1;background:#101216 center/cover no-repeat}
+.stage-canvas{position:absolute;inset:0;z-index:2;width:100%;height:100%}
+/* transparent-mode checkerboard so the user sees the alpha */
+.stage-bg.transparent{
+  background-color:#e9edf2;
+  background-image:
+    linear-gradient(45deg,#b9c1cc 25%,transparent 25%),
+    linear-gradient(-45deg,#b9c1cc 25%,transparent 25%),
+    linear-gradient(45deg,transparent 75%,#b9c1cc 75%),
+    linear-gradient(-45deg,transparent 75%,#b9c1cc 75%);
+  background-size:26px 26px;
+  background-position:0 0,0 13px,13px -13px,-13px 0;
 }
-.empty-hint b{color:#fff}
-.stage.has-cap .empty-hint{display:none}
-
-/* caption words — solid per-word coloring, eased so it sweeps like karaoke */
-.cap-box .w{display:inline-block;white-space:pre;color:var(--ink-c);transition:color .12s linear}
-.cap-box .w.on{color:var(--active)}
+.empty-hint{
+  position:absolute;inset:0;z-index:3;margin:auto;display:flex;align-items:center;justify-content:center;
+  text-align:center;padding:24px;color:#31384a;font-size:15px;line-height:1.7;pointer-events:none;
+  text-shadow:0 1px 0 rgba(255,255,255,.4);
+}
+.empty-hint b{color:#12151a}
 
 /* ---------- Transport ---------- */
 .transport{display:flex;align-items:center;gap:10px;margin-top:12px}
@@ -87,6 +93,8 @@ input[type=checkbox]{width:auto}
 .filepick input[type=file]{font-size:12px}
 .hint{font-size:12px;color:var(--ink-dim);margin:0}
 .hidden{display:none}
+.val{color:var(--accent-2);font-variant-numeric:tabular-nums;font-weight:600}
+hr.sep{border:0;border-top:1px solid var(--line);margin:4px 0}
 
 /* ---------- Buttons ---------- */
 .btn{

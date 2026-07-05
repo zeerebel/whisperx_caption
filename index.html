@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>WhisperX Caption Studio</title>
-  <meta name="description" content="Turn a WhisperX transcript into styled captions — pick the font, colors and layout, preview against your audio, and export SRT / VTT / ASS. 100% in your browser." />
+  <meta name="description" content="Turn a WhisperX transcript into styled, animated captions — pick the font, colors, effects and layout, preview against your audio, and export a transparent PNG sequence (alpha overlay for any editor) plus SRT / VTT / ASS. 100% in your browser." />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%92%AC%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
@@ -14,7 +14,7 @@
       <span class="logo">💬</span>
       <div>
         <h1>WhisperX Caption Studio</h1>
-        <p class="tagline">JSON transcript → styled captions, all in your browser</p>
+        <p class="tagline">JSON transcript → animated captions → transparent overlay</p>
       </div>
     </div>
     <div class="topbar-actions">
@@ -27,10 +27,10 @@
     <!-- ============ STAGE / PREVIEW ============ -->
     <section class="stage-col">
       <div id="dropzone" class="dropzone">
-        <div class="stage-wrap">
+        <div class="stage-wrap" id="stageWrap">
           <div id="stage" class="stage">
-            <div id="stageBg" class="stage-bg"></div>
-            <div id="capLayer" class="cap-layer"><div id="capBox" class="cap-box"></div></div>
+            <div id="stageBg" class="stage-bg transparent"></div>
+            <canvas id="stageCanvas" class="stage-canvas"></canvas>
             <p id="emptyHint" class="empty-hint">
               Drop a <b>WhisperX .json</b> here — or an <b>.srt</b> / <b>.vtt</b> —
               then optionally drop your <b>audio</b> to sync the preview.
@@ -66,7 +66,7 @@
         </div>
       </details>
 
-      <details class="group" open>
+      <details class="group">
         <summary>2 · Line grouping</summary>
         <div class="group-body grid2">
           <label>Max words / line<input id="optMaxWords" type="number" min="1" max="20" value="7" /></label>
@@ -84,8 +84,9 @@
             <select id="optFont"></select>
           </label>
           <input id="fileFont" type="file" accept=".ttf,.otf,.woff,.woff2,font/*" class="hidden" />
+          <p class="hint">Tip: choose <b>Upload font…</b> (or drop a .ttf/.otf/.woff on the stage) to use your own typeface.</p>
           <div class="grid2">
-            <label>Size (@1080p)<input id="optSize" type="number" min="16" max="160" value="64" /></label>
+            <label>Size (@1080p)<input id="optSize" type="number" min="16" max="200" value="64" /></label>
             <label>Weight
               <select id="optWeight">
                 <option>400</option><option>500</option><option>600</option>
@@ -113,61 +114,105 @@
             <label class="color">Text<input id="optColor" type="color" value="#ffffff" /></label>
             <label class="color">Active word<input id="optActive" type="color" value="#ffd400" /></label>
             <label class="color">Outline<input id="optStrokeColor" type="color" value="#000000" /></label>
-            <label>Outline px<input id="optStroke" type="number" min="0" max="20" step="0.5" value="4" /></label>
+            <label>Outline px<input id="optStroke" type="number" min="0" max="24" step="0.5" value="4" /></label>
           </div>
           <label class="check"><input id="optKaraoke" type="checkbox" checked /> Karaoke word highlight (needs word timings)</label>
           <div class="grid2">
             <label class="color">Box color<input id="optBox" type="color" value="#000000" /></label>
             <label>Box opacity<input id="optBoxOpacity" type="range" min="0" max="1" step="0.05" value="0" /></label>
-            <label>Box pad px<input id="optBoxPad" type="number" min="0" max="60" value="14" /></label>
-            <label>Corner px<input id="optBoxRadius" type="number" min="0" max="40" value="10" /></label>
+            <label>Box pad px<input id="optBoxPad" type="number" min="0" max="80" value="14" /></label>
+            <label>Corner px<input id="optBoxRadius" type="number" min="0" max="60" value="10" /></label>
           </div>
           <div class="grid2">
-            <label>Shadow px<input id="optShadow" type="number" min="0" max="30" value="6" /></label>
+            <label>Shadow px<input id="optShadow" type="number" min="0" max="40" value="6" /></label>
             <label class="color">Shadow color<input id="optShadowColor" type="color" value="#000000" /></label>
           </div>
         </div>
       </details>
 
       <details class="group" open>
-        <summary>5 · Layout</summary>
+        <summary>5 · Animation</summary>
         <div class="group-body">
+          <label class="wide">Effect<select id="optAnim"></select></label>
           <div class="grid2">
-            <label>Vertical
-              <select id="optVAlign"><option value="top">Top</option><option value="middle">Middle</option><option value="bottom" selected>Bottom</option></select>
-            </label>
-            <label>Horizontal
-              <select id="optHAlign"><option value="left">Left</option><option value="center" selected>Center</option><option value="right">Right</option></select>
-            </label>
-            <label>Side margin %<input id="optMarginX" type="number" min="0" max="45" value="8" /></label>
-            <label>Edge margin %<input id="optMarginY" type="number" min="0" max="45" value="8" /></label>
-            <label>Max width %<input id="optMaxWidth" type="number" min="30" max="100" value="84" /></label>
+            <label>Speed <span class="val" id="animSpeedVal">1.0×</span><input id="optAnimSpeed" type="range" min="0.25" max="3" step="0.05" value="1" /></label>
+            <label>Intensity <span class="val" id="animIntVal">1.0</span><input id="optAnimIntensity" type="range" min="0" max="2" step="0.05" value="1" /></label>
           </div>
-          <label class="wide">Preview backdrop
-            <select id="optBackdrop">
-              <option value="#101216">Dark</option>
-              <option value="#3a3f4b">Grey</option>
-              <option value="#0a5c36">Green screen</option>
-              <option value="#1e6ab5">Blue</option>
-              <option value="custom">Upload image…</option>
-            </select>
+          <p class="hint">Effects play when a caption appears. Scrub or press play to preview.</p>
+        </div>
+      </details>
+
+      <details class="group">
+        <summary>6 · Layout</summary>
+        <div class="group-body grid2">
+          <label>Vertical
+            <select id="optVAlign"><option value="top">Top</option><option value="middle">Middle</option><option value="bottom" selected>Bottom</option></select>
           </label>
-          <input id="fileBg" type="file" accept="image/*" class="hidden" />
+          <label>Horizontal
+            <select id="optHAlign"><option value="left">Left</option><option value="center" selected>Center</option><option value="right">Right</option></select>
+          </label>
+          <label>Side margin %<input id="optMarginX" type="number" min="0" max="45" value="8" /></label>
+          <label>Edge margin %<input id="optMarginY" type="number" min="0" max="45" value="10" /></label>
+          <label>Max width %<input id="optMaxWidth" type="number" min="30" max="100" value="84" /></label>
         </div>
       </details>
 
       <details class="group" open>
-        <summary>6 · Export</summary>
+        <summary>7 · Background</summary>
         <div class="group-body">
-          <p class="hint">SRT/VTT are plain text captions. <b>ASS</b> carries your font, colors, outline &amp; karaoke — burn it with ffmpeg (see Help).</p>
-          <label class="check"><input id="optExportKaraoke" type="checkbox" checked /> Include word-by-word karaoke (ASS &amp; VTT)</label>
+          <label class="wide">Mode
+            <select id="optBgMode">
+              <option value="transparent" selected>Transparent (alpha overlay)</option>
+              <option value="chroma">Solid color (chroma key)</option>
+              <option value="image">Image (preview only)</option>
+            </select>
+          </label>
+          <label class="wide" id="chromaRow" style="display:none">Key color
+            <select id="optChroma">
+              <option value="#00ff00">Green</option>
+              <option value="#0000ff">Blue</option>
+              <option value="#ff00ff">Magenta</option>
+              <option value="custom">Custom…</option>
+            </select>
+          </label>
+          <input id="optChromaCustom" type="color" value="#00ff00" class="hidden" />
+          <input id="fileBg" type="file" accept="image/*" class="hidden" />
+          <p class="hint">Transparent = true alpha, exported in the PNG sequence for overlaying in any editor. Solid color = for keying out an opaque video.</p>
+        </div>
+      </details>
+
+      <details class="group" open>
+        <summary>8 · Export</summary>
+        <div class="group-body">
+          <p class="hint"><b>Overlay video</b> (with alpha) → PNG sequence. <b>Text captions</b> → SRT / VTT / ASS.</p>
+          <div class="grid2">
+            <label>Resolution
+              <select id="optRes">
+                <option value="1920x1080">1080p — 16:9</option>
+                <option value="3840x2160">4K — 16:9</option>
+                <option value="1080x1920">Vertical — 9:16</option>
+                <option value="1080x1080">Square — 1:1</option>
+              </select>
+            </label>
+            <label>FPS
+              <select id="optFps"><option>24</option><option selected>30</option><option>60</option></select>
+            </label>
+          </div>
+          <button id="dlPngSeq" class="btn primary wide" type="button" disabled>⬇ Transparent PNG sequence (.zip)</button>
+          <div class="export-row">
+            <button id="dlPngFrame" class="btn" type="button" disabled>Single frame .png</button>
+            <button id="dlWebm" class="btn" type="button" disabled>.webm (chroma)</button>
+          </div>
+          <p id="exportProgress" class="hint"></p>
+          <hr class="sep" />
+          <label class="check"><input id="optExportKaraoke" type="checkbox" checked /> Word-by-word karaoke in ASS &amp; VTT</label>
           <div class="export-row">
             <button id="dlSrt" class="btn" type="button" disabled>.srt</button>
             <button id="dlVtt" class="btn" type="button" disabled>.vtt</button>
-            <button id="dlAss" class="btn primary" type="button" disabled>.ass</button>
+            <button id="dlAss" class="btn" type="button" disabled>.ass</button>
             <button id="dlJson" class="btn ghost" type="button" disabled>.json</button>
           </div>
-          <button id="copyFfmpeg" class="btn ghost wide" type="button" disabled>Copy ffmpeg burn-in command</button>
+          <button id="copyFfmpeg" class="btn ghost wide" type="button" disabled>Copy ffmpeg command (burn-in / PNG→ProRes)</button>
         </div>
       </details>
 
@@ -189,6 +234,8 @@
 
   <script src="js/parse.js"></script>
   <script src="js/formats.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/store-only-zip.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

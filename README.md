@@ -1,12 +1,28 @@
 # 💬 WhisperX Caption Studio
 
-Turn a **WhisperX transcript** into **styled captions** — pick the font,
-colors, outline, karaoke highlight and layout, preview it against your audio,
-and export **SRT / VTT / ASS**. Everything runs **in your browser**: no server,
-no upload, no cost. Your audio and transcript never leave your machine.
+Turn a **WhisperX transcript** into **styled, animated captions** — pick the
+font (or upload your own), colors, outline, karaoke highlight, motion effect and
+layout, preview it against your audio, and export a **transparent PNG sequence**
+you can overlay in any video editor, plus **SRT / VTT / ASS**. Everything runs
+**in your browser**: no server, no upload, no cost. Your audio and transcript
+never leave your machine.
 
 It's a static site, so it drops straight onto **Cloudflare Pages** (or GitHub
 Pages, Netlify, or just opening `index.html`).
+
+**What it does**
+
+- 🎬 **Transparent overlay export** — a PNG image sequence with a real alpha
+  channel. Drop it straight over your footage in Premiere, DaVinci Resolve,
+  Final Cut, After Effects or CapCut. No green screen needed.
+- 🟩 **Chroma-key mode** — or render on solid green / blue / magenta and key it
+  out, if you'd rather work with a flat video file.
+- ✨ **18 motion effects** — fade, slide, pop, bounce, typewriter, word-by-word
+  pop, blur-in, wave, drop-in… with speed + intensity controls.
+- 🔤 **Any typeface** — 25 built-in web fonts or **upload your own** `.ttf`/`.otf`/`.woff`.
+- 🎤 **Karaoke word highlight** driven by WhisperX word timings.
+- 📐 **1080p, 4K, vertical 9:16 and square 1:1** at 24 / 30 / 60 fps.
+- 📝 Still exports plain **SRT / VTT / ASS / JSON** for editors that want a caption file.
 
 ---
 
@@ -49,28 +65,63 @@ the studio reads those directly (word-level karaoke needs the JSON, though).
   stage). *Uploaded fonts show in the preview and VTT; to burn a custom font
   into video with ffmpeg the font must also be installed on that machine (or
   passed via `-vf "ass=file.ass:fontsdir=./fonts"`).*
+- **Animation** — pick a motion effect and dial in speed + intensity.
+- **Background** — *Transparent* (checkerboard = alpha, for overlay export),
+  *Solid color* (green/blue/magenta, for chroma keying), or an *Image* preview.
 - **Line grouping** — how words get chunked into caption lines (max words /
   chars / seconds, split on pauses and sentence ends).
 
 ### 3 · Export
 
+Everything renders from the **same engine as the live preview**, so what you see
+is what you get.
+
+**Overlay video (with transparency)** — for dropping captions over your footage:
+
+| Export | Alpha? | Best for |
+|--------|--------|----------|
+| **Transparent PNG sequence (.zip)** | ✅ true alpha | **The universal one.** Imports as an alpha overlay in *every* editor (Premiere, Resolve, FCP, After Effects, CapCut). Pick resolution + fps first. |
+| **Single frame (.png)** | ✅ true alpha | A static lower-third / title / watermark. |
+| **.webm (chroma)** | ❌ opaque | A flat video on your key color — key it out in the editor. (Browsers can't put a real alpha channel in WebM — see note below.) |
+
+**Text caption files** — for editors/platforms that take a caption track:
+
 | Format | What it's for |
 |--------|---------------|
 | **.srt** | Universal plain captions — YouTube, Premiere, CapCut, etc. |
 | **.vtt** | Web captions (`<track>`); optional word-by-word timing. |
-| **.ass** | **Carries your whole look** — font, colors, outline, position and karaoke. This is the one you burn into video. |
+| **.ass** | Carries font/colors/outline/position + karaoke — burn into video with ffmpeg. |
 | **.json** | Your styled cues + settings, to re-open or feed another tool. |
 
-**Burn the styled captions into a video** (the *Copy ffmpeg command* button
-gives you these filled in):
+#### Using the transparent PNG sequence
+
+The `.zip` contains gap-free numbered frames (`cap_00000.png …`) plus a
+`README.txt` with the fps and resolution (a PNG sequence carries no timing of
+its own — set the frame rate at import).
+
+- **Premiere:** File ▸ Import ▸ select `cap_00000.png` ▸ tick **Image Sequence**.
+- **After Effects / DaVinci Resolve / Final Cut:** import the folder as a PNG
+  sequence — the alpha is read automatically. Drop it on a track above your video.
+- **Want one file instead of a folder?** The *Copy ffmpeg command* button gives
+  you a one-liner to mux the frames into an alpha **ProRes 4444 `.mov`** (native
+  in Premiere/FCP/Resolve/AE):
+  ```bash
+  ffmpeg -framerate 30 -i cap_%05d.png -c:v prores_ks -profile:v 4444 -pix_fmt yuva444p10le overlay.mov
+  ```
+
+> **Why not a transparent WebM/MP4 straight from the browser?** Browser video
+> recording (MediaRecorder) **flattens transparency to solid black** — VP8/VP9
+> can hold alpha, but the browser encoder doesn't write it, and Premiere/FCP/
+> Resolve won't read alpha WebM anyway. The PNG sequence (or the ProRes mux
+> above) is the real, editor-compatible alpha path. The `.webm` button here is
+> the *opaque* recorder for the chroma-key workflow only.
+
+**Burn the styled caption file onto a video** instead (the *Copy ffmpeg command*
+button fills these in too):
 
 ```bash
-# caption an existing video
+# caption an existing video with the .ass (keeps your exact look)
 ffmpeg -i input.mp4 -vf "ass=my-conversation.ass" -c:a copy output.mp4
-
-# turn a still image + audio into a captioned video
-ffmpeg -loop 1 -i background.jpg -i my-conversation.mp3 \
-  -vf "ass=my-conversation.ass" -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac output.mp4
 ```
 
 ---
