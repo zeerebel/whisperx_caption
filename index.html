@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>WhisperX Caption Studio</title>
+  <meta name="description" content="Turn a WhisperX transcript into styled captions — pick the font, colors and layout, preview against your audio, and export SRT / VTT / ASS. 100% in your browser." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%92%AC%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">💬</span>
+      <div>
+        <h1>WhisperX Caption Studio</h1>
+        <p class="tagline">JSON transcript → styled captions, all in your browser</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button id="loadSample" class="btn ghost" type="button">Try a sample</button>
+      <a class="btn ghost" href="https://github.com/zeerebel/whisperx_caption#readme" target="_blank" rel="noopener">Help</a>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ============ STAGE / PREVIEW ============ -->
+    <section class="stage-col">
+      <div id="dropzone" class="dropzone">
+        <div class="stage-wrap">
+          <div id="stage" class="stage">
+            <div id="stageBg" class="stage-bg"></div>
+            <div id="capLayer" class="cap-layer"><div id="capBox" class="cap-box"></div></div>
+            <p id="emptyHint" class="empty-hint">
+              Drop a <b>WhisperX .json</b> here — or an <b>.srt</b> / <b>.vtt</b> —
+              then optionally drop your <b>audio</b> to sync the preview.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div class="transport">
+        <button id="playBtn" class="btn play" type="button" aria-label="Play/Pause" disabled>▶</button>
+        <span id="timeNow" class="time">0:00.0</span>
+        <input id="scrubber" class="scrubber" type="range" min="0" max="1000" value="0" step="1" disabled />
+        <span id="timeTotal" class="time">0:00.0</span>
+      </div>
+
+      <div class="cue-strip" id="cueStrip" aria-label="Caption list"></div>
+    </section>
+
+    <!-- ============ CONTROL PANEL ============ -->
+    <aside class="panel">
+      <details class="group" open>
+        <summary>1 · Source</summary>
+        <div class="group-body">
+          <label class="filepick">
+            <span>Transcript (WhisperX .json / .srt / .vtt)</span>
+            <input id="fileJson" type="file" accept=".json,.srt,.vtt,application/json,text/plain" />
+          </label>
+          <label class="filepick">
+            <span>Audio (optional — for synced preview)</span>
+            <input id="fileAudio" type="file" accept="audio/*,video/*" />
+          </label>
+          <p id="srcInfo" class="hint">No transcript loaded.</p>
+        </div>
+      </details>
+
+      <details class="group" open>
+        <summary>2 · Line grouping</summary>
+        <div class="group-body grid2">
+          <label>Max words / line<input id="optMaxWords" type="number" min="1" max="20" value="7" /></label>
+          <label>Max chars / line<input id="optMaxChars" type="number" min="8" max="80" value="38" /></label>
+          <label>Max seconds / line<input id="optMaxDur" type="number" min="0.5" max="12" step="0.1" value="5" /></label>
+          <label>Split on gap ≥ (s)<input id="optMaxGap" type="number" min="0.1" max="4" step="0.05" value="0.7" /></label>
+          <label class="check"><input id="optPunct" type="checkbox" checked /> Break on sentence end (. ? !)</label>
+        </div>
+      </details>
+
+      <details class="group" open>
+        <summary>3 · Type</summary>
+        <div class="group-body">
+          <label class="wide">Font
+            <select id="optFont"></select>
+          </label>
+          <div class="grid2">
+            <label>Size (@1080p)<input id="optSize" type="number" min="16" max="160" value="64" /></label>
+            <label>Weight
+              <select id="optWeight">
+                <option>400</option><option>500</option><option>600</option>
+                <option selected>700</option><option>800</option><option>900</option>
+              </select>
+            </label>
+            <label>Tracking<input id="optTracking" type="number" min="-4" max="20" step="0.5" value="0" /></label>
+            <label>Line height<input id="optLineH" type="number" min="0.9" max="2" step="0.05" value="1.15" /></label>
+          </div>
+          <label class="wide">Transform
+            <select id="optTransform">
+              <option value="none">None</option>
+              <option value="uppercase">UPPERCASE</option>
+              <option value="lowercase">lowercase</option>
+              <option value="capitalize">Capitalize</option>
+            </select>
+          </label>
+        </div>
+      </details>
+
+      <details class="group" open>
+        <summary>4 · Color &amp; effect</summary>
+        <div class="group-body">
+          <div class="grid2">
+            <label class="color">Text<input id="optColor" type="color" value="#ffffff" /></label>
+            <label class="color">Active word<input id="optActive" type="color" value="#ffd400" /></label>
+            <label class="color">Outline<input id="optStrokeColor" type="color" value="#000000" /></label>
+            <label>Outline px<input id="optStroke" type="number" min="0" max="20" step="0.5" value="4" /></label>
+          </div>
+          <label class="check"><input id="optKaraoke" type="checkbox" checked /> Karaoke word highlight (needs word timings)</label>
+          <div class="grid2">
+            <label class="color">Box color<input id="optBox" type="color" value="#000000" /></label>
+            <label>Box opacity<input id="optBoxOpacity" type="range" min="0" max="1" step="0.05" value="0" /></label>
+            <label>Box pad px<input id="optBoxPad" type="number" min="0" max="60" value="14" /></label>
+            <label>Corner px<input id="optBoxRadius" type="number" min="0" max="40" value="10" /></label>
+          </div>
+          <div class="grid2">
+            <label>Shadow px<input id="optShadow" type="number" min="0" max="30" value="6" /></label>
+            <label class="color">Shadow color<input id="optShadowColor" type="color" value="#000000" /></label>
+          </div>
+        </div>
+      </details>
+
+      <details class="group" open>
+        <summary>5 · Layout</summary>
+        <div class="group-body">
+          <div class="grid2">
+            <label>Vertical
+              <select id="optVAlign"><option value="top">Top</option><option value="middle">Middle</option><option value="bottom" selected>Bottom</option></select>
+            </label>
+            <label>Horizontal
+              <select id="optHAlign"><option value="left">Left</option><option value="center" selected>Center</option><option value="right">Right</option></select>
+            </label>
+            <label>Side margin %<input id="optMarginX" type="number" min="0" max="45" value="8" /></label>
+            <label>Edge margin %<input id="optMarginY" type="number" min="0" max="45" value="8" /></label>
+            <label>Max width %<input id="optMaxWidth" type="number" min="30" max="100" value="84" /></label>
+          </div>
+          <label class="wide">Preview backdrop
+            <select id="optBackdrop">
+              <option value="#101216">Dark</option>
+              <option value="#3a3f4b">Grey</option>
+              <option value="#0a5c36">Green screen</option>
+              <option value="#1e6ab5">Blue</option>
+              <option value="custom">Upload image…</option>
+            </select>
+          </label>
+          <input id="fileBg" type="file" accept="image/*" class="hidden" />
+        </div>
+      </details>
+
+      <details class="group" open>
+        <summary>6 · Export</summary>
+        <div class="group-body">
+          <p class="hint">SRT/VTT are plain text captions. <b>ASS</b> carries your font, colors, outline &amp; karaoke — burn it with ffmpeg (see Help).</p>
+          <label class="check"><input id="optExportKaraoke" type="checkbox" checked /> Include word-by-word karaoke (ASS &amp; VTT)</label>
+          <div class="export-row">
+            <button id="dlSrt" class="btn" type="button" disabled>.srt</button>
+            <button id="dlVtt" class="btn" type="button" disabled>.vtt</button>
+            <button id="dlAss" class="btn primary" type="button" disabled>.ass</button>
+            <button id="dlJson" class="btn ghost" type="button" disabled>.json</button>
+          </div>
+          <button id="copyFfmpeg" class="btn ghost wide" type="button" disabled>Copy ffmpeg burn-in command</button>
+        </div>
+      </details>
+
+      <details class="group">
+        <summary>Presets</summary>
+        <div class="group-body">
+          <div class="export-row">
+            <button id="savePreset" class="btn ghost" type="button">Save style</button>
+            <button id="resetPreset" class="btn ghost" type="button">Reset</button>
+          </div>
+          <p class="hint">Your style auto-saves in this browser.</p>
+        </div>
+      </details>
+    </aside>
+  </main>
+
+  <audio id="audio" preload="auto"></audio>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/parse.js"></script>
+  <script src="js/formats.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

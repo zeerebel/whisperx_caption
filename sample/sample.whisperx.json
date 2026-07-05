@@ -1,0 +1,206 @@
+{
+  "language": "en",
+  "segments": [
+    {
+      "start": 0.31,
+      "end": 3.68,
+      "text": "So what got you into martial arts in the first place?",
+      "words": [
+        {
+          "word": "So",
+          "start": 0.31,
+          "end": 0.49
+        },
+        {
+          "word": "what",
+          "start": 0.51,
+          "end": 0.7
+        },
+        {
+          "word": "got",
+          "start": 0.72,
+          "end": 0.94
+        },
+        {
+          "word": "you",
+          "start": 0.96,
+          "end": 1.12
+        },
+        {
+          "word": "into",
+          "start": 1.15,
+          "end": 1.42
+        },
+        {
+          "word": "martial",
+          "start": 1.46,
+          "end": 1.9
+        },
+        {
+          "word": "arts",
+          "start": 1.93,
+          "end": 2.28
+        },
+        {
+          "word": "in",
+          "start": 2.34,
+          "end": 2.46
+        },
+        {
+          "word": "the",
+          "start": 2.48,
+          "end": 2.6
+        },
+        {
+          "word": "first",
+          "start": 2.63,
+          "end": 2.98
+        },
+        {
+          "word": "place?",
+          "start": 3.02,
+          "end": 3.68
+        }
+      ]
+    },
+    {
+      "start": 4.05,
+      "end": 8.12,
+      "text": "Honestly, it was discipline. I was a kid with way too much energy.",
+      "words": [
+        {
+          "word": "Honestly,",
+          "start": 4.05,
+          "end": 4.6
+        },
+        {
+          "word": "it",
+          "start": 4.74,
+          "end": 4.85
+        },
+        {
+          "word": "was",
+          "start": 4.88,
+          "end": 5.06
+        },
+        {
+          "word": "discipline.",
+          "start": 5.1,
+          "end": 5.82
+        },
+        {
+          "word": "I",
+          "start": 6.11,
+          "end": 6.2
+        },
+        {
+          "word": "was",
+          "start": 6.23,
+          "end": 6.42
+        },
+        {
+          "word": "a",
+          "start": 6.45,
+          "end": 6.52
+        },
+        {
+          "word": "kid",
+          "start": 6.55,
+          "end": 6.83
+        },
+        {
+          "word": "with",
+          "start": 6.87,
+          "end": 7.05
+        },
+        {
+          "word": "way",
+          "start": 7.08,
+          "end": 7.3
+        },
+        {
+          "word": "too",
+          "start": 7.33,
+          "end": 7.52
+        },
+        {
+          "word": "much",
+          "start": 7.55,
+          "end": 7.8
+        },
+        {
+          "word": "energy.",
+          "start": 7.84,
+          "end": 8.12
+        }
+      ]
+    },
+    {
+      "start": 8.6,
+      "end": 12.4,
+      "text": "And the mat was the one place that energy actually made sense.",
+      "words": [
+        {
+          "word": "And",
+          "start": 8.6,
+          "end": 8.78
+        },
+        {
+          "word": "the",
+          "start": 8.8,
+          "end": 8.92
+        },
+        {
+          "word": "mat",
+          "start": 8.95,
+          "end": 9.2
+        },
+        {
+          "word": "was",
+          "start": 9.24,
+          "end": 9.42
+        },
+        {
+          "word": "the",
+          "start": 9.45,
+          "end": 9.57
+        },
+        {
+          "word": "one",
+          "start": 9.6,
+          "end": 9.82
+        },
+        {
+          "word": "place",
+          "start": 9.86,
+          "end": 10.2
+        },
+        {
+          "word": "that",
+          "start": 10.34,
+          "end": 10.52
+        },
+        {
+          "word": "energy",
+          "start": 10.56,
+          "end": 11.02
+        },
+        {
+          "word": "actually",
+          "start": 11.08,
+          "end": 11.6
+        },
+        {
+          "word": "made",
+          "start": 11.66,
+          "end": 11.94
+        },
+        {
+          "word": "sense.",
+          "start": 11.98,
+          "end": 12.4
+        }
+      ]
+    }
+  ]
+}

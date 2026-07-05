@@ -1,0 +1,20 @@
+# local audio / transcripts you drop in while testing
+*.mp3
+*.wav
+*.m4a
+*.mp4
+# keep the committed sample
+!sample/*.json
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+node_modules/
