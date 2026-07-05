@@ -73,8 +73,11 @@
   }
 
   const loadedGFonts = new Set();
+  const customFonts = new Set(); // user-uploaded typefaces
   function fontValue(name) {
+    if (name === "__upload" || !name) return "sans-serif";
     if (SYSFONTS[name]) return SYSFONTS[name];
+    if (customFonts.has(name)) return `'${name}', sans-serif`;
     ensureGFont(name);
     return `'${name}', sans-serif`;
   }
@@ -98,9 +101,38 @@
     const og2 = document.createElement("optgroup");
     og2.label = "System";
     Object.keys(SYSFONTS).forEach((f) => og2.appendChild(new Option(f, f)));
+    const ogU = document.createElement("optgroup");
+    ogU.label = "Custom";
+    ogU.id = "customFontGroup";
+    ogU.appendChild(new Option("Upload font…", "__upload"));
     sel.appendChild(og1);
     sel.appendChild(og2);
+    sel.appendChild(ogU);
     sel.value = "Inter";
+  }
+
+  // Load a user font file, register it, and add it to the picker.
+  function loadFontFile(file) {
+    const name = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() || "Custom Font";
+    const fr = new FileReader();
+    fr.onload = () => {
+      const face = new FontFace(name, fr.result);
+      face
+        .load()
+        .then((f) => {
+          document.fonts.add(f);
+          customFonts.add(name);
+          const grp = document.getElementById("customFontGroup");
+          if (![...grp.children].some((o) => o.value === name))
+            grp.insertBefore(new Option(name, name), grp.firstChild);
+          $("optFont").value = name;
+          applyStyle();
+          saveStyle();
+          toast("✓ Font “" + name + "” added");
+        })
+        .catch(() => toast("⚠️ Could not read that font file"));
+    };
+    fr.readAsArrayBuffer(file);
   }
 
   // ---------- apply visual style to the preview caption ----------
@@ -406,6 +438,21 @@
       $("stageBg").style.background = v;
     });
 
+    // custom font upload via the "Upload font…" menu entry
+    let lastFont = $("optFont").value;
+    $("optFont").addEventListener("change", (e) => {
+      if (e.target.value === "__upload") {
+        e.target.value = lastFont;
+        applyStyle();
+        $("fileFont").click();
+      } else lastFont = e.target.value;
+    });
+    $("fileFont").addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      if (f) loadFontFile(f);
+      e.target.value = "";
+    });
+
     $("playBtn").addEventListener("click", () => (state.playing ? pause() : play()));
     $("scrubber").addEventListener("input", (e) => seek((e.target.value / 1000) * state.duration));
 
@@ -434,6 +481,7 @@
     dz.addEventListener("drop", (e) => {
       for (const f of e.dataTransfer.files) {
         if (/\.(json|srt|vtt|txt)$/i.test(f.name)) { state.baseName = f.name; readFile(f, (t) => loadTranscriptText(f.name, t)); }
+        else if (/\.(ttf|otf|woff2?)$/i.test(f.name) || /^font\//.test(f.type)) { loadFontFile(f); }
         else if (/^(audio|video)\//.test(f.type)) { audio.src = URL.createObjectURL(f); audio.onloadedmetadata = () => rebuildCues(); }
         else if (/^image\//.test(f.type)) { $("stageBg").style.background = `url(${URL.createObjectURL(f)}) center/cover no-repeat`; }
       }

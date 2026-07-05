@@ -44,7 +44,11 @@ the studio reads those directly (word-level karaoke needs the JSON, though).
 - **Audio** — optionally drop the `.mp3` too, so the preview plays in sync and
   the words highlight karaoke-style.
 - **Style** — font, size, weight, color, active-word color, outline, box,
-  shadow, position, margins. Live preview updates as you tweak.
+  shadow, position, margins. Live preview updates as you tweak. Want your own
+  typeface? Pick **Font → Upload font…** (or drop a `.ttf`/`.otf`/`.woff` on the
+  stage). *Uploaded fonts show in the preview and VTT; to burn a custom font
+  into video with ffmpeg the font must also be installed on that machine (or
+  passed via `-vf "ass=file.ass:fontsdir=./fonts"`).*
 - **Line grouping** — how words get chunked into caption lines (max words /
   chars / seconds, split on pauses and sentence ends).
 
