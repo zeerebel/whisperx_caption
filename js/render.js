@@ -67,9 +67,10 @@
   const SCOPE = {};
   ANIMATIONS.forEach((a) => (SCOPE[a.id] = a.scope));
 
-  // Whole-block transform for line-scope animations.
-  // tr = seconds since the cue appeared; k = intensity; sp = speed; fontPx for scale-relative moves.
-  function lineTransform(id, tr, k, sp, fontPx) {
+  // Whole-block transform for line-scope animations. tr = seconds since the cue
+  // appeared; k = intensity; sp = speed; fontPx and scale (= H/1080) keep every
+  // pixel displacement resolution-independent so preview == export.
+  function lineTransform(id, tr, k, sp, fontPx, scale) {
     const T = (d) => Math.min(Math.max(tr / (d / sp), 0), 1);
     const I = { dx: 0, dy: 0, sx: 1, sy: 1, rot: 0, alpha: 1, blur: 0, clip: 1, flash: 0, chars: null };
     switch (id) {
@@ -79,20 +80,20 @@
       case "pop-scale-in": { const p = T(0.35); const e = EASE.outBack(p); I.sx = I.sy = 0.6 + 0.4 * e; I.alpha = EASE.outCubic(p); break; }
       case "bounce-in": { const p = T(0.6); const s = p <= 0 ? 0 : EASE.outElastic(p); I.sx = I.sy = s; I.alpha = Math.min(1, p * 3); break; }
       case "zoom-in": { const e = EASE.outCubic(T(0.4)); I.sx = I.sy = 1 + 0.6 * k * (1 - e); I.alpha = e; break; }
-      case "blur-in": { const e = EASE.outCubic(T(0.35)); I.alpha = e; I.blur = (1 - e) * 10 * k; break; }
-      case "rise-float": { const e = EASE.outCubic(T(0.5)); I.dy = (1 - e) * 26 * k + Math.sin(tr * 2 * Math.PI / 3) * 4 * k; I.alpha = e; break; }
+      case "blur-in": { const e = EASE.outCubic(T(0.35)); I.alpha = e; I.blur = (1 - e) * 10 * k * scale; break; }
+      case "rise-float": { const e = EASE.outCubic(T(0.5)); I.dy = ((1 - e) * 26 + Math.sin(tr * 2 * Math.PI / 3) * 4) * k * scale; I.alpha = e; break; }
       case "wipe-reveal": I.clip = EASE.inOutQuad(T(0.35)); break;
       case "typewriter": I.chars = T(Math.max(0.4, 0.05 * 24)); break; // reveal fraction 0..1 over ~1.2s
-      case "shake": { const amp = EASE.pulse(T(0.3)) * 7 * k; I.dx = Math.sin(tr * 42) * amp; I.dy = Math.cos(tr * 55) * amp * 0.6; break; }
+      case "shake": { const amp = EASE.pulse(T(0.3)) * 7 * k * scale; I.dx = Math.sin(tr * 42) * amp; I.dy = Math.cos(tr * 55) * amp * 0.6; break; }
       case "color-flash": I.flash = EASE.pulse(T(0.4)); break;
-      case "drop-in-gravity": { const p = T(0.6); const e = EASE.outBounce(p); I.dy = (1 - e) * -90 * k; I.alpha = p > 0 ? 1 : 0; break; }
+      case "drop-in-gravity": { const p = T(0.6); const e = EASE.outBounce(p); I.dy = (1 - e) * -90 * k * scale; I.alpha = p > 0 ? 1 : 0; break; }
       default: break;
     }
     return I;
   }
 
-  // Per-word transform for word-scope animations.
-  function wordTransform(id, i, tr, k, sp) {
+  // Per-word transform for word-scope animations (scale keeps px moves resolution-independent).
+  function wordTransform(id, i, tr, k, sp, scale) {
     const W = { dx: 0, dy: 0, sx: 1, sy: 1, alpha: 1 };
     switch (id) {
       case "word-pop-in": {
@@ -106,12 +107,12 @@
         const stag = 0.1 / sp;
         const p = Math.min(Math.max((tr - i * stag) / (0.25 / sp), 0), 1);
         const e = EASE.outCubic(p);
-        W.alpha = e; W.dy = (1 - e) * 9 * k;
+        W.alpha = e; W.dy = (1 - e) * 9 * k * scale;
         break;
       }
       case "wave": {
         const env = Math.min(Math.max(tr / 0.4, 0), 1);
-        W.dy = Math.sin(tr * 2 * Math.PI * 0.8 + i * 0.6) * 8 * k * env;
+        W.dy = Math.sin(tr * 2 * Math.PI * 0.8 + i * 0.6) * 8 * k * scale * env;
         break;
       }
       default: break;
@@ -238,7 +239,7 @@
 
     const tr = t - cue.start;
     const scope = SCOPE[anim.id] || "line";
-    const line = scope === "line" ? lineTransform(anim.id, tr, k, sp, L.fontPx) : { dx: 0, dy: 0, sx: 1, sy: 1, rot: 0, alpha: 1, blur: 0, clip: 1, flash: 0, chars: null };
+    const line = scope === "line" ? lineTransform(anim.id, tr, k, sp, L.fontPx, scale) : { dx: 0, dy: 0, sx: 1, sy: 1, rot: 0, alpha: 1, blur: 0, clip: 1, flash: 0, chars: null };
 
     const cx = (L.boxLeft + L.boxRight) / 2;
     const cy = L.blockTop + L.blockHeight / 2;
@@ -295,7 +296,7 @@
         if (style.karaoke && cue.words && t >= tk.start) fill = style.activeColor;
         if (line.flash > 0) fill = lerpHex(fill, style.activeColor, line.flash);
 
-        const wt = scope === "word" ? wordTransform(anim.id, tk.i, tr, k, sp) : null;
+        const wt = scope === "word" ? wordTransform(anim.id, tk.i, tr, k, sp, scale) : null;
         ctx.save();
         if (wt) {
           const wcx = tk.x + tk.w / 2, wcy = ln.baselineY - L.fontPx * 0.35;

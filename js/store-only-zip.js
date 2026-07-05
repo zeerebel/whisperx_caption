@@ -36,7 +36,18 @@
   const DOS_DATE = 0x0021;
   const utf8 = new TextEncoder();
 
+  // A plain (non-ZIP64) ZIP stores entry counts in 16 bits and sizes/offsets in
+  // 32 bits. Rather than silently emit a corrupt archive past those limits, fail
+  // loudly — the caller surfaces it and the user lowers fps / resolution / length.
+  const MAX_ENTRIES = 0xffff; // 65535
+  const MAX_U32 = 0xffffffff; // 4 GiB - 1
+
   function createStoreZip(files) {
+    if (files.length > MAX_ENTRIES)
+      throw new Error(
+        `Too many frames for one ZIP (${files.length} > 65535). Lower the FPS or export a shorter clip.`
+      );
+
     const records = [];
     const localParts = [];
     let offset = 0;
@@ -45,6 +56,8 @@
       const nameBytes = utf8.encode(files[i].name);
       const data = files[i].data;
       const size = data.length;
+      if (size > MAX_U32 || offset > MAX_U32)
+        throw new Error("Export exceeds the 4 GiB ZIP limit. Lower the resolution/FPS or shorten the clip.");
       const crc = crc32(data);
 
       const local = new Uint8Array(30 + nameBytes.length);
@@ -68,6 +81,8 @@
     }
 
     const centralDirOffset = offset;
+    if (centralDirOffset > MAX_U32)
+      throw new Error("Export exceeds the 4 GiB ZIP limit. Lower the resolution/FPS or shorten the clip.");
     const centralParts = [];
     let centralSize = 0;
     for (let i = 0; i < records.length; i++) {
@@ -115,6 +130,7 @@
     for (let i = 0; i < frames.length; i++) {
       const buf = await frames[i].blob.arrayBuffer();
       files.push({ name: frames[i].name, data: new Uint8Array(buf) });
+      frames[i].blob = null; // release each source blob as it's consumed to cap peak memory
     }
     return createStoreZip(files);
   }

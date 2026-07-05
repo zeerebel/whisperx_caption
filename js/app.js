@@ -29,6 +29,8 @@
     rafClock: null,
     baseName: null,
     exporting: false,
+    audioUrl: null,
+    bgUrl: null,
   };
 
   const audio = $("audio");
@@ -90,6 +92,7 @@
 
   // ---------- fonts ----------
   const loadedGFonts = new Set();
+  const gfontReady = new Map(); // family -> Promise that resolves when its stylesheet has loaded
   const customFonts = new Set();
   function fontValue(name) {
     if (name === "__upload" || !name) return "sans-serif";
@@ -107,6 +110,8 @@
       "https://fonts.googleapis.com/css2?family=" +
       encodeURIComponent(name).replace(/%20/g, "+") +
       ":wght@400;500;600;700;800;900&display=swap";
+    // remember when the @font-face rules are actually registered, so exports can wait
+    gfontReady.set(name, new Promise((res) => { link.onload = res; link.onerror = res; }));
     document.head.appendChild(link);
   }
   function buildFontList() {
@@ -192,7 +197,25 @@
     $("optChromaCustom").classList.toggle("hidden", !(mode === "chroma" && $("optChroma").value === "custom"));
     if (mode === "transparent") bg.style.background = "";
     else if (mode === "chroma") bg.style.background = bgColor();
-    // image mode background is set when a file is chosen
+    else if (mode === "image" && !state.bgUrl) bg.classList.add("transparent"); // no image yet → keep checkerboard
+  }
+
+  // Object-URL-owning setters that revoke the previous URL so repeated picks don't leak.
+  function setAudioFile(f) {
+    if (state.audioUrl) URL.revokeObjectURL(state.audioUrl);
+    state.audioUrl = URL.createObjectURL(f);
+    audio.src = state.audioUrl;
+    audio.onloadedmetadata = () => { rebuildCues(); toast("✓ Audio synced"); };
+  }
+  function setBgImageFile(f) {
+    if (state.bgUrl) URL.revokeObjectURL(state.bgUrl);
+    state.bgUrl = URL.createObjectURL(f);
+    $("optBgMode").value = "image";
+    const bg = $("stageBg");
+    bg.classList.remove("transparent");
+    bg.style.background = `url(${state.bgUrl}) center/cover no-repeat`;
+    updateBackground();
+    saveStyle();
   }
 
   // ---------- cues ----------
@@ -315,8 +338,13 @@
   // ---------- transparent exporters ----------
   async function ensureFontsForExport(style, h) {
     try {
-      await document.fonts.ready;
+      // For a just-selected Google font the <link> may still be loading — wait for
+      // it (custom uploads are added synchronously, so gfontReady won't have them).
+      if (gfontReady.has(style.fontName)) await gfontReady.get(style.fontName);
       await document.fonts.load(`${style.weight} ${Math.round(style.size * (h / 1080))}px ${style.fontFamily}`, "AaGg0123");
+      await document.fonts.ready;
+      if (!document.fonts.check(`${style.weight} ${Math.round(style.size * (h / 1080))}px ${style.fontFamily}`))
+        toast("⚠️ Font may not be fully loaded — export could use a fallback");
     } catch (e) {}
   }
 
@@ -325,8 +353,9 @@
     const { w, h } = exportRes();
     const fps = exportFps();
     const frameCount = Math.max(1, Math.round(state.duration * fps));
-    if (frameCount > 900 &&
-        !confirm(`${frameCount} frames at ${w}×${h} is a large export and may use a lot of memory.\n\nTip: lower the FPS or trim the audio for shorter clips. Continue?`))
+    // memory budget scales with resolution, not just frame count (4K frames cost 4× 1080p)
+    if (frameCount * w * h > 1920 * 1080 * 900 &&
+        !confirm(`${frameCount} frames at ${w}×${h} is a large export and may use a lot of memory.\n\nTip: lower the FPS/resolution or trim the audio for shorter clips. Continue?`))
       return;
     const style = buildRenderStyle();
     const anim = readAnim();
@@ -342,6 +371,7 @@
         const t = i / fps;
         WXC.render.drawCaption(octx, cueAt(t), style, t, w, h, anim);
         const blob = await new Promise((res) => off.toBlob(res, "image/png"));
+        if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
         frames.push({ name: `cap_${String(i).padStart(5, "0")}.png`, blob });
         if (i % 4 === 0) {
           $("exportProgress").textContent = `Rendering frame ${i + 1} / ${frameCount}…`;
@@ -369,7 +399,7 @@
   }
 
   async function exportPngFrame() {
-    if (!state.cues.length) return;
+    if (!state.cues.length || state.exporting) return;
     const { w, h } = exportRes();
     let t = state.t;
     let cue = cueAt(t);
@@ -380,8 +410,11 @@
     off.width = w; off.height = h;
     const octx = off.getContext("2d", { alpha: true });
     WXC.render.drawCaption(octx, cue, style, t, w, h, readAnim());
-    off.toBlob((b) => WXC.zip.downloadBlob(b, `${baseName()}_frame.png`), "image/png");
-    toast("✓ Transparent PNG exported");
+    off.toBlob((b) => {
+      if (!b) return toast("⚠️ PNG export failed (resolution too large?)");
+      WXC.zip.downloadBlob(b, `${baseName()}_frame.png`);
+      toast("✓ Transparent PNG exported");
+    }, "image/png");
   }
 
   // Opaque WebM recorded in real time — for the chroma-key path (browser WebM
@@ -398,39 +431,48 @@
     const anim = readAnim();
     setExportBusy(true);
     pause();
-    await ensureFontsForExport(style, h);
+    let mr = null;
+    try {
+      await ensureFontsForExport(style, h);
+      const rec = document.createElement("canvas"); rec.width = w; rec.height = h;
+      const rctx = rec.getContext("2d", { alpha: false });
+      const cap = document.createElement("canvas"); cap.width = w; cap.height = h;
+      const cctx = cap.getContext("2d", { alpha: true });
 
-    const rec = document.createElement("canvas"); rec.width = w; rec.height = h;
-    const rctx = rec.getContext("2d", { alpha: false });
-    const cap = document.createElement("canvas"); cap.width = w; cap.height = h;
-    const cctx = cap.getContext("2d", { alpha: true });
-
-    const stream = rec.captureStream(fps);
-    const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm";
-    const mr = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12000000 });
-    const chunks = [];
-    mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
-    const stopped = new Promise((r) => (mr.onstop = r));
-    mr.start();
-    const startT = performance.now();
-    await new Promise((resolve) => {
-      function frame() {
-        const t = (performance.now() - startT) / 1000;
-        rctx.fillStyle = bg; rctx.fillRect(0, 0, w, h);
-        WXC.render.drawCaption(cctx, cueAt(t), style, t, w, h, anim);
-        rctx.drawImage(cap, 0, 0);
-        $("exportProgress").textContent = `Recording ${t.toFixed(1)}s / ${state.duration.toFixed(1)}s…`;
-        if (t >= state.duration) { resolve(); return; }
-        requestAnimationFrame(frame);
-      }
-      frame();
-    });
-    mr.stop();
-    await stopped;
-    const blob = new Blob(chunks, { type: "video/webm" });
-    WXC.zip.downloadBlob(blob, `${baseName()}_${w}x${h}_chroma.webm`);
-    $("exportProgress").textContent = "✓ WebM exported (opaque — key out the background)";
-    setExportBusy(false);
+      const stream = rec.captureStream(fps);
+      const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm";
+      mr = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12000000 });
+      const chunks = [];
+      mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      const stopped = new Promise((r) => (mr.onstop = r));
+      mr.start();
+      const startT = performance.now();
+      await new Promise((resolve, reject) => {
+        function frame() {
+          try {
+            const t = (performance.now() - startT) / 1000;
+            rctx.fillStyle = bg; rctx.fillRect(0, 0, w, h);
+            WXC.render.drawCaption(cctx, cueAt(t), style, t, w, h, anim);
+            rctx.drawImage(cap, 0, 0);
+            $("exportProgress").textContent = `Recording ${t.toFixed(1)}s / ${state.duration.toFixed(1)}s…`;
+            if (t >= state.duration) { resolve(); return; }
+            requestAnimationFrame(frame);
+          } catch (err) { reject(err); }
+        }
+        frame();
+      });
+      mr.stop();
+      await stopped;
+      const blob = new Blob(chunks, { type: "video/webm" });
+      WXC.zip.downloadBlob(blob, `${baseName()}_${w}x${h}_chroma.webm`);
+      $("exportProgress").textContent = "✓ WebM exported (opaque — key out the background)";
+      toast("✓ WebM exported");
+    } catch (e) {
+      $("exportProgress").textContent = "⚠️ WebM export failed: " + e.message;
+    } finally {
+      if (mr && mr.state !== "inactive") { try { mr.stop(); } catch (e) {} }
+      setExportBusy(false);
+    }
   }
 
   function copyFfmpeg() {
@@ -459,7 +501,11 @@
   ];
   function saveStyle() {
     const o = {};
-    STYLE_KEYS.forEach((id) => { const el = $(id); if (el) o[id] = el.type === "checkbox" ? el.checked : el.value; });
+    STYLE_KEYS.forEach((id) => {
+      const el = $(id); if (!el) return;
+      if (id === "optFont" && el.value === "__upload") return; // never persist the upload sentinel
+      o[id] = el.type === "checkbox" ? el.checked : el.value;
+    });
     try { localStorage.setItem("wxc.style", JSON.stringify(o)); } catch (e) {}
   }
   function loadStyle() {
@@ -489,10 +535,12 @@
     buildFontList();
     buildAnimList();
     loadStyle();
+    if ($("optBgMode").value === "image") $("optBgMode").value = "transparent"; // image blobs can't be persisted
     updateBackground();
 
     document.querySelectorAll(".panel input, .panel select").forEach((el) => {
       el.addEventListener("input", () => {
+        if (el.id === "optFont" && el.value === "__upload") return; // sentinel handled by the change listener
         if (TIMING_IDS.includes(el.id)) rebuildCues();
         if (el.id === "optRes") resizePreview();
         if (el.id === "optAnimSpeed") $("animSpeedVal").textContent = (+el.value).toFixed(2).replace(/0$/, "") + "×";
@@ -508,8 +556,7 @@
     });
     $("fileAudio").addEventListener("change", (e) => {
       const f = e.target.files[0]; if (!f) return;
-      audio.src = URL.createObjectURL(f);
-      audio.onloadedmetadata = () => { rebuildCues(); toast("✓ Audio synced"); };
+      setAudioFile(f);
     });
 
     // background controls
@@ -521,10 +568,7 @@
     $("optChromaCustom").addEventListener("input", () => { updateBackground(); saveStyle(); });
     $("fileBg").addEventListener("change", (e) => {
       const f = e.target.files[0]; if (!f) return;
-      $("optBgMode").value = "image";
-      $("stageBg").classList.remove("transparent");
-      $("stageBg").style.background = `url(${URL.createObjectURL(f)}) center/cover no-repeat`;
-      updateBackground();
+      setBgImageFile(f);
     });
 
     // custom font upload
@@ -560,16 +604,14 @@
       for (const f of e.dataTransfer.files) {
         if (/\.(json|srt|vtt|txt)$/i.test(f.name)) { state.baseName = f.name; readFile(f, (t) => loadTranscriptText(f.name, t)); }
         else if (/\.(ttf|otf|woff2?)$/i.test(f.name) || /^font\//.test(f.type)) loadFontFile(f);
-        else if (/^(audio|video)\//.test(f.type)) { audio.src = URL.createObjectURL(f); audio.onloadedmetadata = () => rebuildCues(); }
-        else if (/^image\//.test(f.type)) {
-          $("optBgMode").value = "image"; $("stageBg").classList.remove("transparent");
-          $("stageBg").style.background = `url(${URL.createObjectURL(f)}) center/cover no-repeat`; updateBackground();
-        }
+        else if (/^(audio|video)\//.test(f.type)) setAudioFile(f);
+        else if (/^image\//.test(f.type)) setBgImageFile(f);
       }
     });
 
     audio.addEventListener("play", () => { if (!state.playing) play(); });
     audio.addEventListener("pause", () => { if (state.playing && audio.currentTime < audio.duration) pause(); });
+    audio.addEventListener("ended", pause);
     window.addEventListener("resize", resizePreview);
     document.addEventListener("keydown", (e) => {
       if (e.code === "Space" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) {
