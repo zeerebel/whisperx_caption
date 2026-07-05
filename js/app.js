@@ -499,14 +499,18 @@
     "optMaxWords", "optMaxChars", "optMaxDur", "optMaxGap", "optPunct",
     "optExportKaraoke", "optBgMode", "optChroma", "optChromaCustom", "optRes", "optFps",
   ];
-  function saveStyle() {
+  // Snapshot every style control into a plain object (the shape a preset stores).
+  function captureStyle() {
     const o = {};
     STYLE_KEYS.forEach((id) => {
       const el = $(id); if (!el) return;
       if (id === "optFont" && el.value === "__upload") return; // never persist the upload sentinel
       o[id] = el.type === "checkbox" ? el.checked : el.value;
     });
-    try { localStorage.setItem("wxc.style", JSON.stringify(o)); } catch (e) {}
+    return o;
+  }
+  function saveStyle() {
+    try { localStorage.setItem("wxc.style", JSON.stringify(captureStyle())); } catch (e) {}
   }
   function loadStyle() {
     let o;
@@ -516,6 +520,158 @@
       if (o[id] === undefined) return;
       const el = $(id); if (!el) return;
       if (el.type === "checkbox") el.checked = o[id]; else el.value = o[id];
+    });
+  }
+  function updateAnimLabels() {
+    $("animSpeedVal").textContent = (+$("optAnimSpeed").value).toFixed(2).replace(/0$/, "") + "×";
+    $("animIntVal").textContent = (+$("optAnimIntensity").value).toFixed(1);
+  }
+
+  // ---------- presets ----------
+  // Built-in look templates. Each is a PARTIAL style object: only the keys it
+  // lists get applied, so switching a template keeps your export resolution/fps
+  // and background mode untouched. Values map 1:1 to the STYLE_KEYS control ids.
+  const BUILTIN_PRESETS = [
+    { name: "Bold Yellow (Hormozi)", style: {
+      optFont: "Anton", optSize: "72", optWeight: "400", optTransform: "uppercase",
+      optColor: "#ffffff", optActive: "#ffe000", optStrokeColor: "#000000", optStroke: "6",
+      optKaraoke: true, optBoxOpacity: "0", optShadow: "4", optShadowColor: "#000000",
+      optAnim: "word-pop-in", optAnimSpeed: "1", optAnimIntensity: "1",
+      optVAlign: "bottom", optHAlign: "center", optMarginY: "12", optMaxWidth: "82",
+      optMaxWords: "4", optMaxChars: "22" } },
+    { name: "Karaoke Pop", style: {
+      optFont: "Poppins", optSize: "64", optWeight: "800", optTransform: "uppercase",
+      optColor: "#ffffff", optActive: "#00e5ff", optStrokeColor: "#10131a", optStroke: "5",
+      optKaraoke: true, optBoxOpacity: "0", optShadow: "5", optShadowColor: "#000000",
+      optAnim: "word-pop-in", optAnimSpeed: "1.2", optAnimIntensity: "1.1",
+      optVAlign: "bottom", optHAlign: "center", optMaxWords: "5", optMaxChars: "28" } },
+    { name: "Clean White", style: {
+      optFont: "Inter", optSize: "58", optWeight: "700", optTransform: "none",
+      optColor: "#ffffff", optActive: "#7cc4ff", optStrokeColor: "#000000", optStroke: "3",
+      optKaraoke: true, optBoxOpacity: "0", optShadow: "8", optShadowColor: "#000000",
+      optAnim: "fade-in", optAnimSpeed: "1", optAnimIntensity: "1",
+      optVAlign: "bottom", optHAlign: "center" } },
+    { name: "Bebas Big Outline", style: {
+      optFont: "Bebas Neue", optSize: "96", optWeight: "400", optTracking: "1", optTransform: "uppercase",
+      optColor: "#ffffff", optActive: "#ffd400", optStrokeColor: "#000000", optStroke: "7",
+      optKaraoke: true, optBoxOpacity: "0", optShadow: "3", optShadowColor: "#000000",
+      optAnim: "pop-scale-in", optAnimSpeed: "1", optAnimIntensity: "1",
+      optVAlign: "bottom", optHAlign: "center", optMaxWords: "3" } },
+    { name: "Boxed Subtitle", style: {
+      optFont: "Inter", optSize: "50", optWeight: "700", optTransform: "none",
+      optColor: "#ffffff", optActive: "#ffd400", optStrokeColor: "#000000", optStroke: "0",
+      optKaraoke: false, optBox: "#000000", optBoxOpacity: "0.55", optBoxPad: "16", optBoxRadius: "12",
+      optShadow: "0", optAnim: "slide-up", optAnimSpeed: "1", optAnimIntensity: "1",
+      optVAlign: "bottom", optHAlign: "center", optMarginY: "10" } },
+    { name: "Minimal Lower Third", style: {
+      optFont: "Montserrat", optSize: "42", optWeight: "600", optTransform: "none",
+      optColor: "#ffffff", optActive: "#ffffff", optStrokeColor: "#000000", optStroke: "2",
+      optKaraoke: false, optBoxOpacity: "0", optShadow: "6", optShadowColor: "#000000",
+      optAnim: "slide-up", optAnimSpeed: "1", optAnimIntensity: "1",
+      optVAlign: "bottom", optHAlign: "left", optMarginX: "6", optMaxWidth: "70" } },
+  ];
+
+  const PRESET_LS = "wxc.presets";
+  function getUserPresets() {
+    try { return JSON.parse(localStorage.getItem(PRESET_LS)) || {}; } catch (e) { return {}; }
+  }
+  function setUserPresets(o) {
+    try { localStorage.setItem(PRESET_LS, JSON.stringify(o)); } catch (e) {}
+  }
+  function buildPresetList(selectValue) {
+    const sel = $("presetSelect");
+    sel.innerHTML = "";
+    sel.appendChild(new Option("— Select a preset —", ""));
+    const ogB = document.createElement("optgroup");
+    ogB.label = "Built-in templates";
+    BUILTIN_PRESETS.forEach((p) => ogB.appendChild(new Option(p.name, "b:" + p.name)));
+    sel.appendChild(ogB);
+    const user = getUserPresets();
+    const names = Object.keys(user).sort((a, b) => a.localeCompare(b));
+    if (names.length) {
+      const ogU = document.createElement("optgroup");
+      ogU.label = "My presets";
+      names.forEach((n) => ogU.appendChild(new Option(n, "u:" + n)));
+      sel.appendChild(ogU);
+    }
+    if (selectValue !== undefined) sel.value = selectValue;
+  }
+  // Apply a partial style object, then refresh everything downstream so the
+  // change behaves exactly like the user having set each control by hand.
+  function applyPreset(style) {
+    STYLE_KEYS.forEach((id) => {
+      if (style[id] === undefined) return;
+      const el = $(id); if (!el) return;
+      if (el.type === "checkbox") el.checked = !!style[id]; else el.value = style[id];
+    });
+    fontValue($("optFont").value);          // trigger Google-font load if needed
+    if ($("optBgMode").value === "image") $("optBgMode").value = "transparent";
+    updateBackground();
+    updateAnimLabels();
+    rebuildCues();                          // re-group if line-grouping changed
+    resizePreview();                        // re-fit + redraw for any res change
+    saveStyle();
+  }
+  function selectedPreset() {
+    const v = $("presetSelect").value;
+    if (!v) return null;
+    const kind = v.slice(0, 2), name = v.slice(2);
+    if (kind === "b:") return { builtin: true, name, style: (BUILTIN_PRESETS.find((p) => p.name === name) || {}).style };
+    if (kind === "u:") return { builtin: false, name, style: getUserPresets()[name] };
+    return null;
+  }
+  function savePresetAs() {
+    const name = (prompt("Name this preset:") || "").trim();
+    if (!name) return;
+    if (BUILTIN_PRESETS.some((p) => p.name === name)) return toast("⚠️ That name is reserved by a built-in template");
+    const user = getUserPresets();
+    if (user[name] && !confirm(`Overwrite your preset “${name}”?`)) return;
+    user[name] = captureStyle();
+    setUserPresets(user);
+    buildPresetList("u:" + name);
+    toast(`✓ Saved preset “${name}”`);
+  }
+  function updateCurrentPreset() {
+    const p = selectedPreset();
+    if (!p || p.builtin) return toast("Pick one of your own presets to update (built-ins are read-only)");
+    const user = getUserPresets();
+    user[p.name] = captureStyle();
+    setUserPresets(user);
+    toast(`✓ Updated “${p.name}”`);
+  }
+  function deleteCurrentPreset() {
+    const p = selectedPreset();
+    if (!p || p.builtin) return toast("Built-in templates can't be deleted");
+    if (!confirm(`Delete your preset “${p.name}”?`)) return;
+    const user = getUserPresets();
+    delete user[p.name];
+    setUserPresets(user);
+    buildPresetList("");
+    toast(`✓ Deleted “${p.name}”`);
+  }
+  function exportPresetPack() {
+    const user = getUserPresets();
+    if (!Object.keys(user).length) return toast("No saved presets to export yet — use Save as… first");
+    const pack = { v: 1, kind: "wxc-preset-pack", presets: user };
+    download("caption-presets.json", JSON.stringify(pack, null, 2), "application/json");
+    toast("✓ Preset pack exported");
+  }
+  function importPresetPack(file) {
+    readFile(file, (txt) => {
+      let data;
+      try { data = JSON.parse(txt); } catch (e) { return toast("⚠️ Not a valid preset file"); }
+      const incoming = data && data.presets && typeof data.presets === "object" ? data.presets
+        : (data && typeof data === "object" && !Array.isArray(data)) ? data : null;
+      if (!incoming) return toast("⚠️ No presets found in that file");
+      const user = getUserPresets();
+      let n = 0;
+      Object.keys(incoming).forEach((name) => {
+        if (BUILTIN_PRESETS.some((p) => p.name === name)) return; // don't shadow built-ins
+        if (incoming[name] && typeof incoming[name] === "object") { user[name] = incoming[name]; n++; }
+      });
+      setUserPresets(user);
+      buildPresetList("");
+      toast(n ? `✓ Imported ${n} preset${n > 1 ? "s" : ""}` : "Nothing new to import");
     });
   }
 
@@ -592,7 +748,18 @@
     $("dlJson").addEventListener("click", () => download(baseName() + ".captions.json", WXC.formats.toJSON(state.cues, readAssStyle())));
     $("copyFfmpeg").addEventListener("click", copyFfmpeg);
 
-    $("savePreset").addEventListener("click", () => { saveStyle(); toast("✓ Style saved"); });
+    // presets
+    buildPresetList();
+    $("presetSelect").addEventListener("change", () => {
+      const p = selectedPreset();
+      if (p && p.style) { applyPreset(p.style); toast(`✓ Applied “${p.name}”`); }
+    });
+    $("presetSaveAs").addEventListener("click", savePresetAs);
+    $("presetUpdate").addEventListener("click", updateCurrentPreset);
+    $("presetDelete").addEventListener("click", deleteCurrentPreset);
+    $("presetExport").addEventListener("click", exportPresetPack);
+    $("presetImport").addEventListener("click", () => $("presetImportFile").click());
+    $("presetImportFile").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) importPresetPack(f); e.target.value = ""; });
     $("resetPreset").addEventListener("click", () => { try { localStorage.removeItem("wxc.style"); } catch (e) {} location.reload(); });
     $("loadSample").addEventListener("click", loadSample);
 
@@ -620,8 +787,7 @@
     });
 
     // reflect any restored anim slider labels
-    $("animSpeedVal").textContent = (+$("optAnimSpeed").value).toFixed(2).replace(/0$/, "") + "×";
-    $("animIntVal").textContent = (+$("optAnimIntensity").value).toFixed(1);
+    updateAnimLabels();
     resizePreview();
   }
 
