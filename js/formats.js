@@ -66,7 +66,9 @@
     const r = h.slice(0, 2),
       g = h.slice(2, 4),
       b = h.slice(4, 6);
-    const a = pad(Math.round((1 - (alpha == null ? 1 : alpha)) * 255).toString(16).padStart(2, "0"), 2);
+    // ASS alpha byte: 00 = opaque, FF = transparent. Already a 2-char hex string;
+    // do NOT wrap in pad() (its Math.floor turns hex like "1a" into "NaN").
+    const a = Math.round((1 - (alpha == null ? 1 : alpha)) * 255).toString(16).padStart(2, "0");
     return `&H${a}${b}${g}${r}`.toUpperCase();
   }
   const alignMap = {
