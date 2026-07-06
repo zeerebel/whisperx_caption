@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.4.0";
+  const APP_VERSION = "1.5.0";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -445,11 +445,11 @@
   function baseName() { return (state.baseName || "captions").replace(/\.[^.]+$/, ""); }
   function setExportEnabled(on) {
     ["dlSrt", "dlVtt", "dlAss", "dlJson", "copyFfmpeg", "playBtn", "scrubber",
-     "dlPngSeq", "dlPngFrame", "dlWebm"].forEach((id) => ($(id).disabled = !on));
+     "dlPngSeq", "dlPngFrame", "dlWebm", "dlMov"].forEach((id) => ($(id).disabled = !on));
   }
   function setExportBusy(b) {
     state.exporting = b;
-    ["dlPngSeq", "dlPngFrame", "dlWebm", "playBtn"].forEach((id) => ($(id).disabled = b || !state.cues.length));
+    ["dlPngSeq", "dlPngFrame", "dlWebm", "dlMov", "playBtn"].forEach((id) => ($(id).disabled = b || !state.cues.length));
   }
 
   // ---------- transparent exporters ----------
@@ -588,6 +588,101 @@
       $("exportProgress").textContent = "⚠️ WebM export failed: " + e.message;
     } finally {
       if (mr && mr.state !== "inactive") { try { mr.stop(); } catch (e) {} }
+      setExportBusy(false);
+    }
+  }
+
+  // ---------- in-browser transparent .mov (ffmpeg.wasm, lazy-loaded) ----------
+  // Single-threaded core → no SharedArrayBuffer, so NO COOP/COEP headers are
+  // needed and Google-Fonts loading is unaffected. Loaded only on first click.
+  let ffmpegInstance = null;
+  const FF = {
+    ffmpeg: "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js",
+    util: "https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js",
+    coreJs: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js",
+    coreWasm: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm",
+  };
+  function loadScriptOnce(src) {
+    return new Promise((resolve, reject) => {
+      if ([...document.scripts].some((s) => s.src === src)) return resolve();
+      const s = document.createElement("script");
+      s.src = src; s.onload = () => resolve(); s.onerror = () => reject(new Error("Failed to load " + src));
+      document.head.appendChild(s);
+    });
+  }
+  async function ensureFFmpeg() {
+    if (ffmpegInstance) return ffmpegInstance;
+    await loadScriptOnce(FF.ffmpeg);
+    await loadScriptOnce(FF.util);
+    if (!window.FFmpegWASM || !window.FFmpegUtil) throw new Error("encoder scripts did not initialize");
+    const { FFmpeg } = window.FFmpegWASM;
+    const { toBlobURL } = window.FFmpegUtil;
+    const ff = new FFmpeg();
+    await ff.load({
+      coreURL: await toBlobURL(FF.coreJs, "text/javascript"),
+      wasmURL: await toBlobURL(FF.coreWasm, "application/wasm"),
+    });
+    ffmpegInstance = ff;
+    return ff;
+  }
+
+  async function exportMov() {
+    if (!state.cues.length || state.exporting) return;
+    const { w, h } = exportRes();
+    const fps = exportFps();
+    const frameCount = Math.max(1, Math.round(state.duration * fps));
+    if (frameCount * w * h > 1920 * 1080 * 600 &&
+        !confirm(`${frameCount} frames at ${w}×${h} is large for in-browser encoding and may run out of memory.\n\nTip: lower the FPS/resolution or trim the clip. Continue?`))
+      return;
+    const style = buildRenderStyle();
+    const anim = readAnim();
+    setExportBusy(true);
+    pause();
+    $("exportProgress").textContent = "Loading the in-browser encoder (first time downloads ~30 MB)…";
+    let ff;
+    try {
+      ff = await ensureFFmpeg();
+    } catch (e) {
+      $("exportProgress").textContent = "⚠️ Couldn't load the in-browser encoder (offline or blocked). Use “.webm (chroma)” + Copy ffmpeg command instead.";
+      toast("⚠️ Encoder unavailable — use the ffmpeg command");
+      setExportBusy(false);
+      return;
+    }
+    const names = [];
+    try {
+      await ensureFontsForExport(style, h);
+      const off = document.createElement("canvas");
+      off.width = w; off.height = h;
+      const octx = off.getContext("2d", { alpha: true });
+      for (let i = 0; i < frameCount; i++) {
+        const t = i / fps;
+        WXC.render.drawCaption(octx, cueAt(t), style, t, w, h, anim);
+        const blob = await new Promise((res) => off.toBlob(res, "image/png"));
+        if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
+        const name = `cap_${String(i).padStart(5, "0")}.png`;
+        await ff.writeFile(name, new Uint8Array(await blob.arrayBuffer()));
+        names.push(name);
+        if (i % 4 === 0) {
+          $("exportProgress").textContent = `Rendering frame ${i + 1} / ${frameCount}…`;
+          await new Promise((r) => setTimeout(r, 0));
+        }
+      }
+      $("exportProgress").textContent = "Encoding transparent ProRes 4444 .mov…";
+      await ff.exec(["-framerate", String(fps), "-i", "cap_%05d.png",
+        "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le", "out.mov"]);
+      const data = await ff.readFile("out.mov");
+      // free the virtual filesystem so a second export doesn't accumulate
+      for (const n of names) { try { await ff.deleteFile(n); } catch (e) {} }
+      try { await ff.deleteFile("out.mov"); } catch (e) {}
+      if (!data || !data.length) throw new Error("no output — this encoder build may lack ProRes; use the PNG sequence instead.");
+      WXC.zip.downloadBlob(new Blob([data], { type: "video/quicktime" }), `${baseName()}_${w}x${h}_alpha.mov`);
+      $("exportProgress").textContent = `✓ Transparent .mov exported (${w}×${h}, ${fps}fps, ProRes 4444)`;
+      toast("✓ Transparent .mov exported");
+    } catch (e) {
+      for (const n of names) { try { await ff.deleteFile(n); } catch (err) {} }
+      $("exportProgress").textContent = "⚠️ .mov encode failed: " + e.message + " — the PNG sequence + Copy ffmpeg command is the reliable path.";
+      toast("⚠️ .mov encode failed");
+    } finally {
       setExportBusy(false);
     }
   }
@@ -871,6 +966,7 @@
     $("dlPngSeq").addEventListener("click", exportPngSequence);
     $("dlPngFrame").addEventListener("click", exportPngFrame);
     $("dlWebm").addEventListener("click", exportWebm);
+    $("dlMov").addEventListener("click", exportMov);
     $("dlSrt").addEventListener("click", () => download(baseName() + ".srt", WXC.formats.toSRT(state.cues)));
     $("dlVtt").addEventListener("click", () => download(baseName() + ".vtt", WXC.formats.toVTT(state.cues, $("optExportKaraoke").checked), "text/vtt"));
     $("dlAss").addEventListener("click", () => download(baseName() + ".ass", WXC.formats.toASS(state.cues, readAssStyle(), { karaoke: $("optExportKaraoke").checked })));
