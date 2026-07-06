@@ -42,11 +42,69 @@
   const MAX_ENTRIES = 0xffff; // 65535
   const MAX_U32 = 0xffffffff; // 4 GiB - 1
 
+  function localHeaderBytes(nameBytes, crc, size) {
+    const local = new Uint8Array(30 + nameBytes.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true); // local file header signature
+    lv.setUint16(4, 20, true); // version needed
+    lv.setUint16(6, 0x0800, true); // flags: bit 11 = UTF-8 filename
+    lv.setUint16(8, 0, true); // method: STORE
+    lv.setUint16(10, DOS_TIME, true);
+    lv.setUint16(12, DOS_DATE, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, size, true); // compressed size
+    lv.setUint32(22, size, true); // uncompressed size
+    lv.setUint16(26, nameBytes.length, true);
+    lv.setUint16(28, 0, true); // extra length
+    local.set(nameBytes, 30);
+    return local;
+  }
+
+  function centralRecordBytes(r) {
+    const central = new Uint8Array(46 + r.nameBytes.length);
+    const cv = new DataView(central.buffer);
+    cv.setUint32(0, 0x02014b50, true); // central dir signature
+    cv.setUint16(4, 20, true); // version made by
+    cv.setUint16(6, 20, true); // version needed
+    cv.setUint16(8, 0x0800, true); // flags: UTF-8
+    cv.setUint16(10, 0, true); // method: STORE
+    cv.setUint16(12, DOS_TIME, true);
+    cv.setUint16(14, DOS_DATE, true);
+    cv.setUint32(16, r.crc, true);
+    cv.setUint32(20, r.size, true);
+    cv.setUint32(24, r.size, true);
+    cv.setUint16(28, r.nameBytes.length, true);
+    cv.setUint16(30, 0, true); // extra length
+    cv.setUint16(32, 0, true); // comment length
+    cv.setUint16(34, 0, true); // disk number
+    cv.setUint16(36, 0, true); // internal attrs
+    cv.setUint32(38, 0, true); // external attrs
+    cv.setUint32(42, r.offset, true);
+    central.set(r.nameBytes, 46);
+    return central;
+  }
+
+  function eocdBytes(count, centralSize, centralDirOffset) {
+    const eocd = new Uint8Array(22);
+    const ev = new DataView(eocd.buffer);
+    ev.setUint32(0, 0x06054b50, true);
+    ev.setUint16(4, 0, true);
+    ev.setUint16(6, 0, true);
+    ev.setUint16(8, count, true);
+    ev.setUint16(10, count, true);
+    ev.setUint32(12, centralSize, true);
+    ev.setUint32(16, centralDirOffset, true);
+    ev.setUint16(20, 0, true);
+    return eocd;
+  }
+
+  const tooManyError = (n) =>
+    new Error(`Too many frames for one ZIP (${n} > 65535). Lower the FPS or export a shorter clip.`);
+  const tooBigError = () =>
+    new Error("Export exceeds the 4 GiB ZIP limit. Lower the resolution/FPS or shorten the clip.");
+
   function createStoreZip(files) {
-    if (files.length > MAX_ENTRIES)
-      throw new Error(
-        `Too many frames for one ZIP (${files.length} > 65535). Lower the FPS or export a shorter clip.`
-      );
+    if (files.length > MAX_ENTRIES) throw tooManyError(files.length);
 
     const records = [];
     const localParts = [];
@@ -56,73 +114,59 @@
       const nameBytes = utf8.encode(files[i].name);
       const data = files[i].data;
       const size = data.length;
-      if (size > MAX_U32 || offset > MAX_U32)
-        throw new Error("Export exceeds the 4 GiB ZIP limit. Lower the resolution/FPS or shorten the clip.");
+      if (size > MAX_U32 || offset > MAX_U32) throw tooBigError();
       const crc = crc32(data);
-
-      const local = new Uint8Array(30 + nameBytes.length);
-      const lv = new DataView(local.buffer);
-      lv.setUint32(0, 0x04034b50, true); // local file header signature
-      lv.setUint16(4, 20, true); // version needed
-      lv.setUint16(6, 0x0800, true); // flags: bit 11 = UTF-8 filename
-      lv.setUint16(8, 0, true); // method: STORE
-      lv.setUint16(10, DOS_TIME, true);
-      lv.setUint16(12, DOS_DATE, true);
-      lv.setUint32(14, crc, true);
-      lv.setUint32(18, size, true); // compressed size
-      lv.setUint32(22, size, true); // uncompressed size
-      lv.setUint16(26, nameBytes.length, true);
-      lv.setUint16(28, 0, true); // extra length
-      local.set(nameBytes, 30);
-
+      const local = localHeaderBytes(nameBytes, crc, size);
       localParts.push(local, data);
       records.push({ nameBytes, crc, size, offset });
       offset += local.length + size;
     }
 
     const centralDirOffset = offset;
-    if (centralDirOffset > MAX_U32)
-      throw new Error("Export exceeds the 4 GiB ZIP limit. Lower the resolution/FPS or shorten the clip.");
+    if (centralDirOffset > MAX_U32) throw tooBigError();
     const centralParts = [];
     let centralSize = 0;
     for (let i = 0; i < records.length; i++) {
-      const r = records[i];
-      const central = new Uint8Array(46 + r.nameBytes.length);
-      const cv = new DataView(central.buffer);
-      cv.setUint32(0, 0x02014b50, true); // central dir signature
-      cv.setUint16(4, 20, true); // version made by
-      cv.setUint16(6, 20, true); // version needed
-      cv.setUint16(8, 0x0800, true); // flags: UTF-8
-      cv.setUint16(10, 0, true); // method: STORE
-      cv.setUint16(12, DOS_TIME, true);
-      cv.setUint16(14, DOS_DATE, true);
-      cv.setUint32(16, r.crc, true);
-      cv.setUint32(20, r.size, true);
-      cv.setUint32(24, r.size, true);
-      cv.setUint16(28, r.nameBytes.length, true);
-      cv.setUint16(30, 0, true); // extra length
-      cv.setUint16(32, 0, true); // comment length
-      cv.setUint16(34, 0, true); // disk number
-      cv.setUint16(36, 0, true); // internal attrs
-      cv.setUint32(38, 0, true); // external attrs
-      cv.setUint32(42, r.offset, true);
-      central.set(r.nameBytes, 46);
+      const central = centralRecordBytes(records[i]);
       centralParts.push(central);
       centralSize += central.length;
     }
 
-    const eocd = new Uint8Array(22);
-    const ev = new DataView(eocd.buffer);
-    ev.setUint32(0, 0x06054b50, true);
-    ev.setUint16(4, 0, true);
-    ev.setUint16(6, 0, true);
-    ev.setUint16(8, records.length, true);
-    ev.setUint16(10, records.length, true);
-    ev.setUint32(12, centralSize, true);
-    ev.setUint32(16, centralDirOffset, true);
-    ev.setUint16(20, 0, true);
+    return new Blob(localParts.concat(centralParts, [eocdBytes(records.length, centralSize, centralDirOffset)]), {
+      type: "application/zip",
+    });
+  }
 
-    return new Blob(localParts.concat(centralParts, [eocd]), { type: "application/zip" });
+  // Incremental variant of createStoreZip: entries are handed to `write`
+  // (e.g. a FileSystemWritableFileStream) as they arrive, so nothing but the
+  // central-directory bookkeeping stays in memory. Same byte output.
+  function createZipStream(write) {
+    const records = [];
+    let offset = 0;
+    return {
+      async add(name, data) {
+        if (records.length >= MAX_ENTRIES) throw tooManyError(records.length + 1);
+        if (data.length > MAX_U32 || offset > MAX_U32) throw tooBigError();
+        const nameBytes = utf8.encode(name);
+        const crc = crc32(data);
+        const local = localHeaderBytes(nameBytes, crc, data.length);
+        await write(local);
+        await write(data);
+        records.push({ nameBytes, crc, size: data.length, offset });
+        offset += local.length + data.length;
+      },
+      async finish() {
+        const centralDirOffset = offset;
+        if (centralDirOffset > MAX_U32) throw tooBigError();
+        let centralSize = 0;
+        for (const r of records) {
+          const central = centralRecordBytes(r);
+          await write(central);
+          centralSize += central.length;
+        }
+        await write(eocdBytes(records.length, centralSize, centralDirOffset));
+      },
+    };
   }
 
   async function createStoreZipFromBlobs(frames) {
@@ -143,9 +187,11 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    // Revoke after a delay, not on the next tick — Firefox can cancel a large
+    // .mov/.zip download if the blob URL is revoked before the save commits.
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
   const WXC = (window.WXC = window.WXC || {});
-  WXC.zip = { crc32, createStoreZip, createStoreZipFromBlobs, downloadBlob };
+  WXC.zip = { crc32, createStoreZip, createZipStream, createStoreZipFromBlobs, downloadBlob };
 })();

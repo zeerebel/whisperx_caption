@@ -291,9 +291,13 @@
           if (charsLeft < text.length) text = text.slice(0, charsLeft);
           charsLeft -= tk.text.length + 1;
         }
-        // fill color (karaoke + color-flash)
+        // is this the word being spoken right now? (drives the pill highlight)
+        const spoken = cue.words && t >= tk.start && t <= tk.end;
+        const pill = style.activePill && spoken;
+        // fill color (karaoke sweep + color-flash). On a pill the text stays the
+        // base color so it reads on the colored box instead of blending in.
         let fill = style.textColor;
-        if (style.karaoke && cue.words && t >= tk.start) fill = style.activeColor;
+        if (!pill && style.karaoke && cue.words && t >= tk.start) fill = style.activeColor;
         if (line.flash > 0) fill = lerpHex(fill, style.activeColor, line.flash);
 
         const wt = scope === "word" ? wordTransform(anim.id, tk.i, tr, k, sp, scale) : null;
@@ -306,6 +310,16 @@
           ctx.globalAlpha *= wt.alpha;
         }
         if (ctx.globalAlpha <= 0.003) { ctx.restore(); continue; }
+
+        // active-word pill: a rounded box behind the current word (Submagic/Hormozi look)
+        if (pill) {
+          const px = L.fontPx, padX = px * 0.20, padY = px * 0.12;
+          ctx.save();
+          ctx.fillStyle = style.activeColor;
+          roundRectPath(ctx, tk.x - padX, ln.baselineY - px * 0.74 - padY, tk.w + padX * 2, px * 0.96 + padY * 2, px * 0.20);
+          ctx.fill();
+          ctx.restore();
+        }
 
         // shadow pass (silhouette of the outlined glyph), then crisp passes
         if (shadowPx > 0) {

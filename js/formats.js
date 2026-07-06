@@ -9,23 +9,26 @@
 
   const pad = (n, w) => String(Math.floor(n)).padStart(w, "0");
 
+  // Round ONCE to the smallest unit, then derive fields from that integer, so a
+  // fractional part like .9997 carries into the seconds instead of emitting an
+  // overflowed field ("00:00:59,1000").
   function srtTime(t) {
-    t = Math.max(0, t);
-    const ms = Math.round((t - Math.floor(t)) * 1000);
-    const s = Math.floor(t) % 60,
-      m = Math.floor(t / 60) % 60,
-      h = Math.floor(t / 3600);
+    const total = Math.round(Math.max(0, t) * 1000); // whole milliseconds
+    const ms = total % 1000;
+    const s = Math.floor(total / 1000) % 60;
+    const m = Math.floor(total / 60000) % 60;
+    const h = Math.floor(total / 3600000);
     return `${pad(h, 2)}:${pad(m, 2)}:${pad(s, 2)},${pad(ms, 3)}`;
   }
   function vttTime(t) {
     return srtTime(t).replace(",", ".");
   }
   function assTime(t) {
-    t = Math.max(0, t);
-    const cs = Math.round((t - Math.floor(t)) * 100);
-    const s = Math.floor(t) % 60,
-      m = Math.floor(t / 60) % 60,
-      h = Math.floor(t / 3600);
+    const total = Math.round(Math.max(0, t) * 100); // whole centiseconds
+    const cs = total % 100;
+    const s = Math.floor(total / 100) % 60;
+    const m = Math.floor(total / 6000) % 60;
+    const h = Math.floor(total / 360000);
     return `${h}:${pad(m, 2)}:${pad(s, 2)}.${pad(cs, 2)}`;
   }
 
@@ -52,7 +55,7 @@
             .map((w, j) => (j === 0 ? "" : `<${vttTime(w.start)}>`) + escapeVTT(w.word))
             .join(" ") + "\n\n";
       } else {
-        out += c.text + "\n\n";
+        out += escapeVTT(c.text) + "\n\n";
       }
     });
     return out;
@@ -133,7 +136,8 @@ Format: Layer, Start, End, Style, MarginL, MarginR, MarginV, Effect, Text
   // A styled config sidecar (handy to re-open or feed another tool)
   function toJSON(cues, style) {
     return JSON.stringify(
-      { v: 1, generator: "whisperx_caption", style, cues: cues.map((c) => ({ start: +c.start.toFixed(3), end: +c.end.toFixed(3), text: c.text, words: c.words })) },
+      // copy words field-by-field: cue words carry app-internal edit markers
+      { v: 1, generator: "whisperx_caption", style, cues: cues.map((c) => ({ start: +c.start.toFixed(3), end: +c.end.toFixed(3), text: c.text, words: c.words ? c.words.map((w) => ({ word: w.word, start: w.start, end: w.end })) : c.words })) },
       null,
       2
     );

@@ -11,10 +11,10 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="logo">💬</span>
+      <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="3" y="7" width="14" height="2.6" rx="1.3" fill="#fff"/><rect x="3" y="12.4" width="18" height="2.6" rx="1.3" fill="#fff" opacity=".82"/></svg></span>
       <div>
         <h1>WhisperX Caption Studio</h1>
-        <p class="tagline">JSON transcript → animated captions → transparent overlay</p>
+        <p class="tagline">Styled, animated captions from a WhisperX transcript</p>
       </div>
     </div>
     <div class="topbar-actions">
@@ -117,6 +117,7 @@
             <label>Outline px<input id="optStroke" type="number" min="0" max="24" step="0.5" value="4" /></label>
           </div>
           <label class="check"><input id="optKaraoke" type="checkbox" checked /> Karaoke word highlight (needs word timings)</label>
+          <label class="check"><input id="optActivePill" type="checkbox" /> Active-word pill — highlight box behind the spoken word</label>
           <div class="grid2">
             <label class="color">Box color<input id="optBox" type="color" value="#000000" /></label>
             <label>Box opacity<input id="optBoxOpacity" type="range" min="0" max="1" step="0.05" value="0" /></label>
@@ -157,7 +158,7 @@
         </div>
       </details>
 
-      <details class="group" open>
+      <details class="group">
         <summary>7 · Background</summary>
         <div class="group-body">
           <label class="wide">Mode
@@ -205,6 +206,7 @@
           </div>
           <button id="dlMov" class="btn wide" type="button" disabled>⬇ Transparent .mov — one click (in-browser, beta)</button>
           <p class="hint">Renders a true-alpha ProRes 4444 <b>.mov</b> right here — drops over footage in any editor, no keying. First use downloads the encoder (~30&nbsp;MB), then it's cached.</p>
+          <button id="exportCancel" class="btn ghost wide hidden" type="button">✕ Cancel export</button>
           <p id="exportProgress" class="hint"></p>
           <hr class="sep" />
           <label class="check"><input id="optExportKaraoke" type="checkbox" checked /> Word-by-word karaoke in ASS &amp; VTT</label>
@@ -218,7 +220,7 @@
         </div>
       </details>
 
-      <details class="group" open>
+      <details class="group">
         <summary>Presets</summary>
         <div class="group-body">
           <label class="wide">Preset
