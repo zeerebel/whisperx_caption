@@ -216,14 +216,26 @@
         </div>
       </details>
 
-      <details class="group">
+      <details class="group" open>
         <summary>Presets</summary>
         <div class="group-body">
+          <label class="wide">Preset
+            <select id="presetSelect"></select>
+          </label>
           <div class="export-row">
-            <button id="savePreset" class="btn ghost" type="button">Save style</button>
+            <button id="presetSaveAs" class="btn" type="button">Save as…</button>
+            <button id="presetUpdate" class="btn ghost" type="button">Update</button>
+            <button id="presetDelete" class="btn ghost" type="button">Delete</button>
+          </div>
+          <div class="export-row">
+            <button id="presetExport" class="btn ghost" type="button">Export pack</button>
+            <button id="presetImport" class="btn ghost" type="button">Import pack</button>
             <button id="resetPreset" class="btn ghost" type="button">Reset</button>
           </div>
-          <p class="hint">Your style auto-saves in this browser.</p>
+          <input id="presetImportFile" type="file" accept=".json,application/json" class="hidden" />
+          <p class="hint">Pick a built-in template or save your own looks. <b>Save as…</b> stores the
+            current style; <b>Export pack</b> downloads all your presets as one file to share or back up.
+            Your working style also auto-saves in this browser.</p>
         </div>
       </details>
     </aside>
