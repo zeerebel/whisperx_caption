@@ -136,7 +136,8 @@ Format: Layer, Start, End, Style, MarginL, MarginR, MarginV, Effect, Text
   // A styled config sidecar (handy to re-open or feed another tool)
   function toJSON(cues, style) {
     return JSON.stringify(
-      { v: 1, generator: "whisperx_caption", style, cues: cues.map((c) => ({ start: +c.start.toFixed(3), end: +c.end.toFixed(3), text: c.text, words: c.words })) },
+      // copy words field-by-field: cue words carry app-internal edit markers
+      { v: 1, generator: "whisperx_caption", style, cues: cues.map((c) => ({ start: +c.start.toFixed(3), end: +c.end.toFixed(3), text: c.text, words: c.words ? c.words.map((w) => ({ word: w.word, start: w.start, end: w.end })) : c.words })) },
       null,
       2
     );
