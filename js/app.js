@@ -592,11 +592,21 @@
   function copyFfmpeg() {
     const name = baseName();
     const fps = exportFps();
+    const { w, h } = exportRes();
+    // the color the chroma WebM was rendered on (green unless you changed it),
+    // as ffmpeg's 0xRRGGBB form, so colorkey removes the right color.
+    const chromaSel = $("optChroma").value;
+    const chromaHex = (chromaSel === "custom" ? $("optChromaCustom").value : chromaSel).replace("#", "0x");
+    const webm = `${name}_${w}x${h}_chroma.webm`;
     const cmd =
       `# Burn styled captions into a video (ffmpeg + libass):\n` +
       `ffmpeg -i input.mp4 -vf "ass=${name}.ass" -c:a copy output.mp4\n\n` +
-      `# Turn the transparent PNG sequence into a single alpha ProRes 4444 .mov\n` +
-      `# (drops straight over footage in Premiere / FCP / Resolve / After Effects):\n` +
+      `# Chroma .webm → real transparent ProRes 4444 .mov (keys out the color, no\n` +
+      `# green screen step needed after — drops over footage in Premiere/FCP/Resolve/AE):\n` +
+      `ffmpeg -i ${webm} -vf "colorkey=${chromaHex}:0.3:0.2,format=yuva444p10le" -c:v prores_ks -profile:v 4444 ${name}_alpha.mov\n\n` +
+      `# Chroma .webm → plain MP4 (stays opaque — key out the color in your editor):\n` +
+      `ffmpeg -i ${webm} -c:v libx264 -pix_fmt yuv420p ${name}.mp4\n\n` +
+      `# Transparent PNG sequence → single alpha ProRes 4444 .mov:\n` +
       `ffmpeg -framerate ${fps} -i cap_%05d.png -c:v prores_ks -profile:v 4444 -pix_fmt yuva444p10le ${name}_overlay.mov\n\n` +
       `# Or QuickTime Animation (lossless RGBA):\n` +
       `ffmpeg -framerate ${fps} -i cap_%05d.png -c:v qtrle -pix_fmt argb ${name}_overlay.mov`;
