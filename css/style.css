@@ -133,3 +133,13 @@ a.btn{text-decoration:none;display:inline-flex;align-items:center}
   opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:50;font-size:13px;
 }
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ---------- Footer / version ---------- */
+.appfoot{
+  text-align:center;color:var(--ink-dim);font-size:11.5px;
+  padding:18px 12px 26px;letter-spacing:.02em;
+}
+.appfoot .dot{margin:0 6px;opacity:.5}
+.appfoot #appVersion{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+.appfoot a{color:var(--ink-dim);text-decoration:none;border-bottom:1px dotted var(--line)}
+.appfoot a:hover{color:var(--ink)}
