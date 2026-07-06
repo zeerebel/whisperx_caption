@@ -229,18 +229,132 @@
     updateTimeUI();
     setExportEnabled(state.cues.length > 0);
   }
+  let editingIndex = -1;
   function renderCueStrip() {
     const strip = $("cueStrip");
     strip.innerHTML = "";
-    state.cues.forEach((c, i) => {
-      const row = document.createElement("div");
-      row.className = "cue-row";
-      row.dataset.i = i;
-      row.innerHTML = `<span class="t">${fmt(c.start)}</span><span class="x"></span>`;
-      row.querySelector(".x").textContent = c.text;
-      row.addEventListener("click", () => seek(c.start + 0.01));
-      strip.appendChild(row);
+    state.cues.forEach((c, i) => strip.appendChild(buildCueRow(c, i)));
+  }
+  function buildCueRow(c, i) {
+    const row = document.createElement("div");
+    row.className = "cue-row" + (c.edited ? " edited" : "");
+    row.dataset.i = i;
+
+    const t = document.createElement("span");
+    t.className = "t";
+    t.textContent = fmt(c.start);
+    t.title = "Jump to this caption";
+    t.addEventListener("click", (e) => { e.stopPropagation(); seek(c.start + 0.01); });
+    row.appendChild(t);
+
+    const x = document.createElement("span");
+    x.className = "x";
+    x.textContent = c.text;
+    x.title = "Click to edit this line";
+    x.addEventListener("click", (e) => { e.stopPropagation(); enterEditMode(row, c, i); });
+    row.appendChild(x);
+
+    if (c.edited && c.original) {
+      const was = document.createElement("span");
+      was.className = "cue-was";
+      was.textContent = "was: " + c.original.text;
+      const rev = document.createElement("button");
+      rev.type = "button";
+      rev.className = "cue-revert";
+      rev.textContent = "↺";
+      rev.title = "Revert to the original transcription";
+      rev.addEventListener("click", (e) => { e.stopPropagation(); revertCueEdit(c); });
+      was.appendChild(rev);
+      row.appendChild(was);
+    }
+
+    row.addEventListener("click", () => seek(c.start + 0.01));
+    return row;
+  }
+
+  // Click a line → edit it. The ORIGINAL transcription stays visible (dimmed,
+  // struck through) above an input pre-filled with the current text; your typed
+  // version becomes the active caption, and ↺ restores the original.
+  function enterEditMode(row, c, i) {
+    if (editingIndex === i) return;
+    editingIndex = i;
+    pause();
+    const orig = (c.original && c.original.text) || c.text;
+    row.className = "cue-row editing";
+    row.innerHTML = "";
+
+    const t = document.createElement("span");
+    t.className = "t"; t.textContent = fmt(c.start);
+    row.appendChild(t);
+
+    const box = document.createElement("div");
+    box.className = "cue-edit";
+    const origEl = document.createElement("div");
+    origEl.className = "cue-orig"; origEl.textContent = orig; origEl.title = "Original transcription";
+    const input = document.createElement("input");
+    input.className = "cue-input"; input.type = "text"; input.value = c.text;
+    input.setAttribute("aria-label", "Corrected caption text");
+    const actions = document.createElement("div");
+    actions.className = "cue-edit-actions";
+    const save = document.createElement("button");
+    save.type = "button"; save.className = "btn tiny"; save.textContent = "Save";
+    const cancel = document.createElement("button");
+    cancel.type = "button"; cancel.className = "btn ghost tiny"; cancel.textContent = "Cancel";
+    actions.appendChild(save); actions.appendChild(cancel);
+    box.appendChild(origEl); box.appendChild(input); box.appendChild(actions);
+    row.appendChild(box);
+
+    const commit = () => { applyCueEdit(c, input.value); editingIndex = -1; renderCueStrip(); };
+    const abort = () => { editingIndex = -1; renderCueStrip(); };
+    save.addEventListener("click", (e) => { e.stopPropagation(); commit(); });
+    cancel.addEventListener("click", (e) => { e.stopPropagation(); abort(); });
+    box.addEventListener("click", (e) => e.stopPropagation()); // don't seek while editing
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); commit(); }
+      else if (e.key === "Escape") { e.preventDefault(); abort(); }
     });
+    input.focus();
+    input.setSelectionRange(0, input.value.length);
+  }
+
+  function applyCueEdit(c, raw) {
+    const newText = raw.replace(/\s+/g, " ").trim();
+    if (!newText || newText === c.text) return;
+    // Remember the original once, so revert always restores the very first version.
+    if (!c.original) c.original = { text: c.text, words: c.words ? c.words.map((w) => ({ ...w })) : null };
+    const tokens = newText.split(" ");
+    if (c.words && c.words.length) {
+      if (tokens.length === c.words.length) {
+        // Same word count → rename in place. cue.words share references with the
+        // underlying model words, so this correction survives re-grouping too.
+        c.words.forEach((w, k) => { w.word = tokens[k]; });
+      } else {
+        // Word count changed → spread this cue's time span evenly across the new
+        // words (keeps karaoke working; per-word timing is approximate).
+        const span = Math.max(0.01, c.end - c.start);
+        const step = span / tokens.length;
+        c.words = tokens.map((tok, k) => ({ word: tok, start: c.start + step * k, end: c.start + step * (k + 1) }));
+      }
+    }
+    c.text = newText;
+    c.edited = true;
+    drawPreview();
+  }
+
+  function revertCueEdit(c) {
+    if (!c.original) return;
+    if (c.words && c.original.words) {
+      if (c.original.words.length === c.words.length) {
+        c.words.forEach((w, k) => { w.word = c.original.words[k].word; w.start = c.original.words[k].start; w.end = c.original.words[k].end; });
+      } else {
+        c.words = c.original.words.map((w) => ({ ...w }));
+      }
+    }
+    c.text = c.original.text;
+    c.edited = false;
+    c.original = null;
+    renderCueStrip();
+    drawPreview();
   }
   function highlightCueRow(idx) {
     const rows = $("cueStrip").children;
