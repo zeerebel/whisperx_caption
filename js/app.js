@@ -5,6 +5,9 @@
   const WXC = window.WXC;
   const $ = (id) => document.getElementById(id);
 
+  // Bump this on every change so the footer shows whether the deploy is current.
+  const APP_VERSION = "1.4.0";
+
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
     "Poppins", "Raleway", "Nunito", "Rubik", "Barlow", "Barlow Condensed",
@@ -812,6 +815,8 @@
   // ---------- wiring ----------
   const TIMING_IDS = ["optMaxWords", "optMaxChars", "optMaxDur", "optMaxGap", "optPunct"];
   function wire() {
+    const vEl = $("appVersion"); if (vEl) vEl.textContent = "v" + APP_VERSION;
+    console.log("WhisperX Caption Studio v" + APP_VERSION);
     buildFontList();
     buildAnimList();
     loadStyle();
