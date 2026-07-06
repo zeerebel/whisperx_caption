@@ -143,7 +143,9 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
+    // Revoke after a delay, not on the next tick — Firefox can cancel a large
+    // .mov/.zip download if the blob URL is revoked before the save commits.
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
   const WXC = (window.WXC = window.WXC || {});

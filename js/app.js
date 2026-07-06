@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.5.0";
+  const APP_VERSION = "1.6.0";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -55,6 +55,7 @@
       textColor: $("optColor").value,
       activeColor: $("optActive").value,
       karaoke: $("optKaraoke").checked,
+      activePill: $("optActivePill").checked,
       outlineColor: $("optStrokeColor").value,
       outline: +$("optStroke").value,
       boxColor: $("optBox").value,
@@ -180,10 +181,11 @@
     return -1;
   }
   function drawPreview() {
-    const cue = cueAt(state.t);
+    const idx = cueIndexAt(state.t);           // one scan instead of cueAt + cueIndexAt
+    const cue = idx >= 0 ? state.cues[idx] : null;
     WXC.render.drawCaption(pctx, cue, buildRenderStyle(), state.t, canvas.width, canvas.height, readAnim());
     $("emptyHint").style.display = state.model ? "none" : "";
-    highlightCueRow(cueIndexAt(state.t));
+    highlightCueRow(idx);
   }
 
   // ---------- background layer ----------
@@ -279,7 +281,10 @@
   // struck through) above an input pre-filled with the current text; your typed
   // version becomes the active caption, and ↺ restores the original.
   function enterEditMode(row, c, i) {
+    if (state.exporting) return;            // don't mutate cues while frames render
     if (editingIndex === i) return;
+    // Close any other open editor first (rebuilds the strip, so re-fetch the row).
+    if (editingIndex !== -1) { renderCueStrip(); row = $("cueStrip").children[i]; if (!row) { editingIndex = -1; return; } }
     editingIndex = i;
     pause();
     const orig = (c.original && c.original.text) || c.text;
@@ -511,6 +516,7 @@
     } catch (e) {
       $("exportProgress").textContent = "⚠️ Export failed: " + e.message;
     } finally {
+      off.width = off.height = 0; // drop the (up to 4K) canvas backing store
       setExportBusy(false);
     }
   }
@@ -548,15 +554,15 @@
     const anim = readAnim();
     setExportBusy(true);
     pause();
-    let mr = null;
+    let mr = null, stream = null, rec = null, cap = null;
     try {
       await ensureFontsForExport(style, h);
-      const rec = document.createElement("canvas"); rec.width = w; rec.height = h;
+      rec = document.createElement("canvas"); rec.width = w; rec.height = h;
       const rctx = rec.getContext("2d", { alpha: false });
-      const cap = document.createElement("canvas"); cap.width = w; cap.height = h;
+      cap = document.createElement("canvas"); cap.width = w; cap.height = h;
       const cctx = cap.getContext("2d", { alpha: true });
 
-      const stream = rec.captureStream(fps);
+      stream = rec.captureStream(fps);
       const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm";
       mr = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12000000 });
       const chunks = [];
@@ -588,6 +594,9 @@
       $("exportProgress").textContent = "⚠️ WebM export failed: " + e.message;
     } finally {
       if (mr && mr.state !== "inactive") { try { mr.stop(); } catch (e) {} }
+      if (stream) stream.getTracks().forEach((t) => t.stop()); // stop the live canvas-capture track
+      if (rec) rec.width = rec.height = 0;
+      if (cap) cap.width = cap.height = 0;
       setExportBusy(false);
     }
   }
@@ -618,10 +627,12 @@
     const { FFmpeg } = window.FFmpegWASM;
     const { toBlobURL } = window.FFmpegUtil;
     const ff = new FFmpeg();
-    await ff.load({
-      coreURL: await toBlobURL(FF.coreJs, "text/javascript"),
-      wasmURL: await toBlobURL(FF.coreWasm, "application/wasm"),
-    });
+    const coreURL = await toBlobURL(FF.coreJs, "text/javascript");
+    const wasmURL = await toBlobURL(FF.coreWasm, "application/wasm");
+    await ff.load({ coreURL, wasmURL });
+    // the worker has instantiated the core; release the ~30 MB of blob URLs
+    URL.revokeObjectURL(coreURL);
+    URL.revokeObjectURL(wasmURL);
     ffmpegInstance = ff;
     return ff;
   }
@@ -649,10 +660,10 @@
       return;
     }
     const names = [];
+    const off = document.createElement("canvas");
+    off.width = w; off.height = h;
     try {
       await ensureFontsForExport(style, h);
-      const off = document.createElement("canvas");
-      off.width = w; off.height = h;
       const octx = off.getContext("2d", { alpha: true });
       for (let i = 0; i < frameCount; i++) {
         const t = i / fps;
@@ -671,18 +682,18 @@
       await ff.exec(["-framerate", String(fps), "-i", "cap_%05d.png",
         "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le", "out.mov"]);
       const data = await ff.readFile("out.mov");
-      // free the virtual filesystem so a second export doesn't accumulate
-      for (const n of names) { try { await ff.deleteFile(n); } catch (e) {} }
-      try { await ff.deleteFile("out.mov"); } catch (e) {}
       if (!data || !data.length) throw new Error("no output — this encoder build may lack ProRes; use the PNG sequence instead.");
       WXC.zip.downloadBlob(new Blob([data], { type: "video/quicktime" }), `${baseName()}_${w}x${h}_alpha.mov`);
       $("exportProgress").textContent = `✓ Transparent .mov exported (${w}×${h}, ${fps}fps, ProRes 4444)`;
       toast("✓ Transparent .mov exported");
     } catch (e) {
-      for (const n of names) { try { await ff.deleteFile(n); } catch (err) {} }
       $("exportProgress").textContent = "⚠️ .mov encode failed: " + e.message + " — the PNG sequence + Copy ffmpeg command is the reliable path.";
       toast("⚠️ .mov encode failed");
     } finally {
+      // always drain the virtual FS (frames + any partial out.mov) and the canvas
+      for (const n of names) { try { await ff.deleteFile(n); } catch (err) {} }
+      try { await ff.deleteFile("out.mov"); } catch (err) {}
+      off.width = off.height = 0;
       setExportBusy(false);
     }
   }
@@ -714,7 +725,7 @@
   // ---------- presets ----------
   const STYLE_KEYS = [
     "optFont", "optSize", "optWeight", "optTracking", "optLineH", "optTransform",
-    "optColor", "optActive", "optStrokeColor", "optStroke", "optKaraoke",
+    "optColor", "optActive", "optStrokeColor", "optStroke", "optKaraoke", "optActivePill",
     "optBox", "optBoxOpacity", "optBoxPad", "optBoxRadius", "optShadow", "optShadowColor",
     "optAnim", "optAnimSpeed", "optAnimIntensity",
     "optVAlign", "optHAlign", "optMarginX", "optMarginY", "optMaxWidth",
@@ -882,18 +893,21 @@
     readFile(file, (txt) => {
       let data;
       try { data = JSON.parse(txt); } catch (e) { return toast("⚠️ Not a valid preset file"); }
-      const incoming = data && data.presets && typeof data.presets === "object" ? data.presets
-        : (data && typeof data === "object" && !Array.isArray(data)) ? data : null;
-      if (!incoming) return toast("⚠️ No presets found in that file");
+      // Require the pack marker so a stray captions.json can't become junk presets.
+      if (!data || data.kind !== "wxc-preset-pack" || typeof data.presets !== "object" || Array.isArray(data.presets))
+        return toast("⚠️ Not a preset pack — make one with “Export pack”");
+      const incoming = data.presets;
       const user = getUserPresets();
-      let n = 0;
-      Object.keys(incoming).forEach((name) => {
-        if (BUILTIN_PRESETS.some((p) => p.name === name)) return; // don't shadow built-ins
-        if (incoming[name] && typeof incoming[name] === "object") { user[name] = incoming[name]; n++; }
-      });
+      const names = Object.keys(incoming).filter((name) =>
+        !BUILTIN_PRESETS.some((p) => p.name === name) && incoming[name] && typeof incoming[name] === "object");
+      if (!names.length) return toast("No presets found in that pack");
+      const clashes = names.filter((n) => user[n]);
+      if (clashes.length && !confirm(`Overwrite ${clashes.length} preset(s) you already have (${clashes.slice(0, 3).join(", ")}${clashes.length > 3 ? "…" : ""})?`))
+        return;
+      names.forEach((n) => { user[n] = incoming[n]; });
       setUserPresets(user);
       buildPresetList("");
-      toast(n ? `✓ Imported ${n} preset${n > 1 ? "s" : ""}` : "Nothing new to import");
+      toast(`✓ Imported ${names.length} preset${names.length > 1 ? "s" : ""}`);
     });
   }
 
@@ -985,7 +999,11 @@
     $("presetExport").addEventListener("click", exportPresetPack);
     $("presetImport").addEventListener("click", () => $("presetImportFile").click());
     $("presetImportFile").addEventListener("change", (e) => { const f = e.target.files[0]; if (f) importPresetPack(f); e.target.value = ""; });
-    $("resetPreset").addEventListener("click", () => { try { localStorage.removeItem("wxc.style"); } catch (e) {} location.reload(); });
+    $("resetPreset").addEventListener("click", () => {
+      if (!confirm("Reset all style controls to defaults and reload? Your loaded transcript, audio and any text edits will be cleared.")) return;
+      try { localStorage.removeItem("wxc.style"); } catch (e) {}
+      location.reload();
+    });
     $("loadSample").addEventListener("click", loadSample);
 
     // drag & drop
