@@ -1,6 +1,19 @@
 /* WhisperX Caption Studio — cinematic dark theme.
- * Editorial display type (self-hosted Oswald), a framed "cinema screen" stage,
- * restrained accents and generous negative space. Every id/class hook that
+ *
+ * Layer model (back → front):
+ *   1. BACKDROP IMAGE  — assets/backdrop.jpg, full-page, fixed. To use your
+ *      own art, just replace that file (dark/moody images work best; any
+ *      size, it's cover-fitted). Rendered by body::before.
+ *   2. GRADIENT VEIL   — a dark gradient painted over the image in the same
+ *      body::before, so the image reads at roughly 15% and the page stays
+ *      consistent even where nothing sits on top.
+ *   3. SURFACES        — panels / transport / cue list are translucent
+ *      (rgba + backdrop blur): faint remnants of the image show through,
+ *      but text stays fully readable.
+ *   4. FILM GRAIN      — body::after, cosmetic.
+ *
+ * Editorial display type (self-hosted Oswald), a framed "cinema screen"
+ * stage, square corners, restrained accents. Every id/class hook that
  * js/app.js relies on is preserved; this file only restyles. */
 
 /* ---------- self-hosted display font (no third-party CDN) ---------- */
@@ -8,8 +21,9 @@
 @font-face{font-family:'Oswald WXC';font-style:normal;font-weight:700;font-display:swap;src:url('../fonts/oswald-700.woff2') format('woff2')}
 
 :root{
-  /* deep cinematic surface ramp */
-  --bg:#06070a; --panel:#0e1014; --panel-2:#151820; --panel-3:#1d212b;
+  /* deep cinematic surface ramp — translucent, so remnants of the backdrop
+     image show through the boxes (text contrast comes from veil + tint) */
+  --bg:#06070a; --panel:rgba(13,16,21,.72); --panel-2:rgba(21,25,33,.80); --panel-3:rgba(29,34,44,.88);
   --line:rgba(255,255,255,.06); --line-strong:rgba(255,255,255,.11);
   --ink:#eef1f6; --ink-dim:#98a1b2; --ink-faint:#606a7a;
   /* one cool accent; yellow reserved for content state */
@@ -38,15 +52,21 @@ html,body{margin:0;min-height:100%}
 ::-webkit-scrollbar-thumb{background:#232833;border:2px solid #0b0d11}
 ::-webkit-scrollbar-thumb:hover{background:#303747}
 ::-webkit-scrollbar-corner{background:transparent}
+html{background:var(--bg)} /* fallback if the backdrop image is missing */
 body{
-  background:
-    radial-gradient(1100px 560px at 82% -10%, rgba(110,168,255,.10), transparent 58%),
-    radial-gradient(900px 700px at 0% 0%, rgba(70,110,200,.06), transparent 55%),
-    linear-gradient(180deg,#080a0e 0%, var(--bg) 42%, #05060a 100%);
-  background-attachment:fixed;
+  background:transparent;
   color:var(--ink);
   font:var(--text-base)/1.5 var(--sans);
   -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+}
+/* BACKDROP: swap assets/backdrop.jpg for your own image. The stacked dark
+   gradient is the veil — image shows through at ~15%, darker at top (under
+   the header) and bottom (under the footer) for consistency. */
+body::before{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+    linear-gradient(180deg, rgba(6,7,10,.92) 0%, rgba(6,7,10,.84) 24%, rgba(6,7,10,.84) 70%, rgba(5,6,10,.92) 100%),
+    url("../assets/backdrop.jpg") center/cover no-repeat;
 }
 /* faint film grain for cinematic texture (never intercepts input) */
 body::after{
@@ -146,6 +166,7 @@ h1{margin:0}
   display:flex;align-items:center;gap:var(--space-3);margin-top:var(--space-3);
   background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
   padding:var(--space-2) var(--space-3);box-shadow:var(--e1);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
 }
 .time{font-family:var(--display);font-weight:500;letter-spacing:.06em;font-variant-numeric:tabular-nums;color:var(--ink-dim);font-size:var(--text-md);min-width:56px;text-align:center}
 .scrubber{flex:1}
@@ -155,6 +176,7 @@ h1{margin:0}
 .cue-strip{
   position:relative;margin-top:var(--space-3);max-height:200px;overflow:auto;
   border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);box-shadow:var(--e1);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
 }
 .cue-row{
   display:flex;gap:var(--space-3);padding:var(--space-3) var(--space-4);
@@ -195,6 +217,7 @@ h1{margin:0}
   display:block;
   background:linear-gradient(180deg,rgba(255,255,255,.018),transparent 40%),var(--panel);
   border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--e1);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   animation:tabIn var(--med) var(--ease);
 }
 @keyframes tabIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
@@ -296,8 +319,12 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:var(--space-1) 0}
 .btn.primary:hover:not(:disabled){background:linear-gradient(180deg,#8dbaff,#6c98ff)}
 .btn.ghost{background:transparent;border-color:var(--line-strong)}
 .btn.ghost:hover:not(:disabled){background:var(--panel-2)}
-.btn.donate{background:linear-gradient(180deg,#ff6b8b,#ff4d73);color:#fff;border-color:transparent;box-shadow:var(--e2),inset 0 1px 0 rgba(255,255,255,.25)}
-.btn.donate:hover:not(:disabled){background:linear-gradient(180deg,#ff85a0,#ff5f82)}
+/* donate: flat + square like everything else; warm accent kept quiet */
+.btn.donate{
+  background:rgba(255,95,130,.08);color:#ff9db2;border:1px solid rgba(255,110,139,.4);box-shadow:none;
+  font-family:var(--display);font-weight:500;text-transform:uppercase;letter-spacing:.06em;font-size:var(--text-sm);
+}
+.btn.donate:hover:not(:disabled){background:rgba(255,95,130,.16);border-color:rgba(255,130,155,.65);color:#ffb3c4}
 .btn.wide{width:100%}
 a.btn{text-decoration:none}
 .export-row{display:flex;gap:var(--space-2);flex-wrap:wrap}
