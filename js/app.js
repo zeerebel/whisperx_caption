@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.7.1";
+  const APP_VERSION = "1.7.2";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -721,9 +721,19 @@
   let ffmpegInstance = null;
   const ffLogRing = [];   // recent ffmpeg stderr lines, kept so a failure can be diagnosed
   let onFfFrame = null;   // optional callback fed the "frame=N" progress during exec
+  // Self-hosted, same-origin encoder — so the .mov export keeps working when
+  // the jsdelivr CDN is blocked (ad-blockers, corporate/school firewalls, some
+  // regions). The wasm is shipped gzipped (~10 MB vs ~30 MB) to fit Cloudflare's
+  // 25 MiB asset limit and is gunzipped in the browser.
+  const LOCAL = {
+    ffmpeg: "vendor/ffmpeg.js",
+    coreJs: "vendor/ffmpeg-core.js",
+    coreWasm: "vendor/ffmpeg-core.wasm.gz",
+  };
+  // CDN — used only as a fallback if the vendored files can't be fetched
+  // (e.g. the app was opened straight from file://).
   const FF = {
     ffmpeg: "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js",
-    util: "https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js",
     coreJs: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js",
     coreWasm: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm",
   };
@@ -739,20 +749,40 @@
   };
   function loadScriptOnce(src) {
     return new Promise((resolve, reject) => {
-      if ([...document.scripts].some((s) => s.src === src)) return resolve();
+      const abs = new URL(src, document.baseURI).href; // script els report .src absolute
+      if ([...document.scripts].some((s) => s.src === abs)) return resolve();
       const s = document.createElement("script");
       s.src = src; s.onload = () => resolve(); s.onerror = () => reject(new Error("Failed to load " + src));
       document.head.appendChild(s);
     });
   }
-  async function ensureFFmpeg() {
-    if (ffmpegInstance) return ffmpegInstance;
-    await loadScriptOnce(FF.ffmpeg);
-    await loadScriptOnce(FF.util);
-    if (!window.FFmpegWASM || !window.FFmpegUtil) throw new Error("encoder scripts did not initialize");
-    const { FFmpeg } = window.FFmpegWASM;
-    const { toBlobURL } = window.FFmpegUtil;
-    const ff = new FFmpeg();
+  async function fetchToBlobURL(url, type) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`could not fetch ${url} (${r.status})`);
+    return URL.createObjectURL(new Blob([await r.arrayBuffer()], { type }));
+  }
+  // Fetch the core wasm → blob URL, transparently gunzipping when the bytes are
+  // gzip-compressed (our self-hosted asset) rather than raw wasm (the CDN).
+  // Detecting by magic bytes keeps it correct even if a host already inflated a
+  // .gz via its own Content-Encoding.
+  async function fetchWasmBlobURL(url) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`could not fetch ${url} (${r.status})`);
+    let buf = new Uint8Array(await r.arrayBuffer());
+    const isWasm = buf[0] === 0x00 && buf[1] === 0x61 && buf[2] === 0x73 && buf[3] === 0x6d; // "\0asm"
+    const isGzip = buf[0] === 0x1f && buf[1] === 0x8b;
+    if (isGzip && !isWasm) {
+      if (typeof DecompressionStream === "undefined")
+        throw new Error("this browser can't unpack the encoder (no DecompressionStream)");
+      const ds = new DecompressionStream("gzip");
+      buf = new Uint8Array(await new Response(new Blob([buf]).stream().pipeThrough(ds)).arrayBuffer());
+    }
+    return URL.createObjectURL(new Blob([buf], { type: "application/wasm" }));
+  }
+  async function buildFFmpeg(ffmpegSrc, coreJsUrl, coreWasmUrl) {
+    await loadScriptOnce(ffmpegSrc);
+    if (!window.FFmpegWASM) throw new Error("encoder script did not initialize");
+    const ff = new window.FFmpegWASM.FFmpeg();
     // Keep the tail of ffmpeg's log so a failed encode can be diagnosed (e.g.
     // an out-of-memory abort), and surface "frame=N" as live encode progress.
     ff.on("log", ({ message }) => {
@@ -761,14 +791,23 @@
       const m = /frame=\s*(\d+)/.exec(message);
       if (m && onFfFrame) onFfFrame(+m[1]);
     });
-    const coreURL = await toBlobURL(FF.coreJs, "text/javascript");
-    const wasmURL = await toBlobURL(FF.coreWasm, "application/wasm");
+    const coreURL = await fetchToBlobURL(coreJsUrl, "text/javascript");
+    const wasmURL = await fetchWasmBlobURL(coreWasmUrl);
     await ff.load({ coreURL, wasmURL });
-    // the worker has instantiated the core; release the ~30 MB of blob URLs
+    // the worker has instantiated the core; release the (~30 MB) blob URLs
     URL.revokeObjectURL(coreURL);
     URL.revokeObjectURL(wasmURL);
-    ffmpegInstance = ff;
     return ff;
+  }
+  async function ensureFFmpeg() {
+    if (ffmpegInstance) return ffmpegInstance;
+    try {
+      ffmpegInstance = await buildFFmpeg(LOCAL.ffmpeg, LOCAL.coreJs, LOCAL.coreWasm);
+    } catch (e) {
+      // Vendored assets unreachable (e.g. opened from file://) — fall back to the CDN.
+      ffmpegInstance = await buildFFmpeg(FF.ffmpeg, FF.coreJs, FF.coreWasm);
+    }
+    return ffmpegInstance;
   }
 
   async function exportMov() {
@@ -793,8 +832,8 @@
     try {
       ff = await ensureFFmpeg();
     } catch (e) {
-      $("exportProgress").textContent = "⚠️ Couldn't load the in-browser encoder (offline or blocked). Use “.webm (chroma)” + Copy ffmpeg command instead.";
-      toast("⚠️ Encoder unavailable — use the ffmpeg command");
+      $("exportProgress").textContent = "⚠️ Couldn't load the in-browser encoder. Use the Transparent PNG sequence + “Copy ffmpeg command”, or “.webm (chroma)”, instead.";
+      toast("⚠️ Encoder unavailable — use the PNG sequence + ffmpeg command");
       setExportBusy(false);
       return;
     }
