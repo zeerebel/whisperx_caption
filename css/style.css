@@ -160,8 +160,33 @@ h1{margin:0}
 .cue-edit-actions{display:flex;gap:6px}
 .btn.tiny{padding:5px 13px;font-size:var(--text-sm);border-radius:8px}
 
-/* ---------- Panel / groups ---------- */
+/* ---------- Tabbed control panel ---------- */
 .panel{display:flex;flex-direction:column;gap:var(--space-3)}
+.tabs{display:flex;flex-wrap:wrap;gap:6px}
+.tab{
+  font-family:var(--display);text-transform:uppercase;letter-spacing:.06em;font-size:var(--text-sm);font-weight:500;
+  padding:9px 13px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink-dim);
+  cursor:pointer;min-height:38px;transition:color var(--fast),background var(--fast),border-color var(--fast);
+}
+.tab:hover{color:var(--ink);background:var(--panel-2)}
+.tab.is-active{color:#fff;background:var(--accent-soft);border-color:rgba(110,168,255,.45);box-shadow:inset 0 -2px 0 var(--accent)}
+.tabpanels{position:relative}
+.tabpanel{display:none}
+.tabpanel.is-active{
+  display:block;
+  background:linear-gradient(180deg,rgba(255,255,255,.018),transparent 40%),var(--panel);
+  border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--e1);
+  animation:tabIn var(--med) var(--ease);
+}
+@keyframes tabIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.panel-title{
+  margin:0;padding:var(--space-4) var(--space-4) 0;
+  font-family:var(--display);font-weight:500;font-size:var(--text-lg);text-transform:uppercase;letter-spacing:.07em;color:var(--ink);
+}
+.tabpanel .group-body{border-top:0;padding-top:var(--space-3)}
+@media (prefers-reduced-motion:reduce){ .tabpanel.is-active{animation:none} }
+
+/* ---------- (legacy accordion styles, retained harmlessly) ---------- */
 .group{
   background:linear-gradient(180deg,rgba(255,255,255,.018),transparent 40%),var(--panel);
   border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;box-shadow:var(--e1);

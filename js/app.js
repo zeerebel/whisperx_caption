@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.9.0";
+  const APP_VERSION = "1.9.1";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -1180,7 +1180,25 @@
 
   // ---------- wiring ----------
   const TIMING_IDS = ["optMaxWords", "optMaxChars", "optMaxDur", "optMaxGap", "optPunct"];
+
+  // Tabbed control panel: one section visible at a time (no long scroll).
+  function wireTabs() {
+    const tabs = [...document.querySelectorAll(".tab")];
+    const panels = [...document.querySelectorAll(".tabpanel")];
+    const activate = (key) => {
+      tabs.forEach((t) => t.classList.toggle("is-active", t.dataset.tab === key));
+      panels.forEach((p) => p.classList.toggle("is-active", p.dataset.panel === key));
+    };
+    tabs.forEach((t) => t.addEventListener("click", () => activate(t.dataset.tab)));
+  }
+  // Jump to a panel by key (e.g. surface the Export tab when an export starts).
+  function showTab(key) {
+    const t = document.querySelector(`.tab[data-tab="${key}"]`);
+    if (t) t.click();
+  }
+
   function wire() {
+    wireTabs();
     const vEl = $("appVersion"); if (vEl) vEl.textContent = "v" + APP_VERSION;
     console.log("WhisperX Caption Studio v" + APP_VERSION);
     buildFontList();
