@@ -1,2 +1,7 @@
 tools/
 .github/
+node_modules/
+package.json
+package-lock.json
+wrangler.toml
+.assetsignore
