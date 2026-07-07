@@ -27,6 +27,10 @@
   <main class="layout">
     <!-- ============ STAGE / PREVIEW ============ -->
     <section class="stage-col">
+      <div class="stage-head">
+        <h2 class="stage-title">Live Preview</h2>
+        <span class="stage-annot">- what you see is what you export</span>
+      </div>
       <div id="dropzone" class="dropzone">
         <div class="stage-wrap" id="stageWrap">
           <div id="stage" class="stage">
@@ -39,7 +43,6 @@
           </div>
         </div>
       </div>
-      <p class="stage-note">Live preview — what you see is exactly what you export.</p>
 
       <div class="transport">
         <button id="playBtn" class="btn play" type="button" aria-label="Play/Pause" disabled>▶</button>
@@ -54,7 +57,7 @@
     <!-- ============ CONTROL PANEL ============ -->
     <aside class="panel">
       <nav class="tabs" role="tablist" aria-label="Controls">
-        <button class="tab is-active" type="button" data-tab="source" role="tab">Source</button>
+        <button class="tab" type="button" data-tab="source" role="tab">Source</button>
         <button class="tab" type="button" data-tab="grouping" role="tab">Grouping</button>
         <button class="tab" type="button" data-tab="type" role="tab">Type</button>
         <button class="tab" type="button" data-tab="color" role="tab">Color</button>
@@ -66,7 +69,7 @@
       </nav>
       <div class="tabpanels">
 
-      <section class="tabpanel is-active" id="tab-source" data-panel="source" role="tabpanel">
+      <section class="tabpanel" id="tab-source" data-panel="source" role="tabpanel">
         <h2 class="panel-title">1 · Source</h2>
         <div class="group-body">
           <label class="filepick">

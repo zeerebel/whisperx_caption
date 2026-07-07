@@ -21,7 +21,8 @@
   --text-xs:11px; --text-sm:12px; --text-base:13px; --text-md:14px; --text-lg:16px; --text-xl:20px;
   --tracking-tight:-.011em;
   --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px; --space-5:24px; --space-6:32px;
-  --radius:14px; --radius-sm:9px;
+  /* square, editorial frames — the reference look is sharp corners */
+  --radius:0px; --radius-sm:0px;
   --e1:0 1px 2px rgba(0,0,0,.5);
   --e2:0 6px 16px rgba(0,0,0,.45),0 1px 3px rgba(0,0,0,.5);
   --e3:0 24px 60px rgba(0,0,0,.6);
@@ -29,6 +30,14 @@
 }
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%}
+
+/* ---------- scrollbars — same family as the surfaces, one step lighter ---------- */
+*{scrollbar-width:thin;scrollbar-color:#262c37 transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#232833;border:2px solid #0b0d11}
+::-webkit-scrollbar-thumb:hover{background:#303747}
+::-webkit-scrollbar-corner{background:transparent}
 body{
   background:
     radial-gradient(1100px 560px at 82% -10%, rgba(110,168,255,.10), transparent 58%),
@@ -58,7 +67,7 @@ h1{margin:0}
 }
 .brand{display:flex;align-items:center;gap:var(--space-3);min-width:0}
 .logo{
-  width:34px;height:34px;flex:none;display:grid;place-items:center;border-radius:10px;
+  width:34px;height:34px;flex:none;display:grid;place-items:center;border-radius:0;
   background:linear-gradient(160deg,#7db0ff,#5b8cff);
   box-shadow:var(--e2),inset 0 1px 0 rgba(255,255,255,.28);
 }
@@ -81,16 +90,17 @@ h1{margin:0}
 /* ---------- Stage ---------- */
 .stage-col{position:sticky;top:82px}
 @media (max-width:960px){ .stage-col{position:static} }
+/* chrome-less drop target — the frame only appears while dragging a file,
+   so the stage reads as one bare square screen (no double frame) */
 .dropzone{
-  border:1.5px dashed var(--line-strong);border-radius:calc(var(--radius) + 4px);
-  padding:var(--space-3);transition:border-color var(--fast) var(--ease),background var(--fast);
-  background:linear-gradient(180deg,rgba(255,255,255,.015),transparent);
+  border:1.5px dashed transparent;border-radius:0;padding:var(--space-2);
+  transition:border-color var(--fast) var(--ease),background var(--fast);
 }
 .dropzone.drag{border-color:var(--accent);background:var(--accent-soft)}
 .stage-wrap{
   position:relative;width:100%;aspect-ratio:16/9;border-radius:var(--radius);overflow:hidden;
   background:#000;margin:0 auto;
-  box-shadow:var(--e3),0 0 0 1px var(--line-strong),0 0 120px -30px rgba(110,168,255,.4);
+  box-shadow:var(--e3),0 0 0 1px var(--line-strong);
 }
 .stage{position:absolute;inset:0}
 .stage-bg{position:absolute;inset:0;z-index:1;background:#0b0d11 center/cover no-repeat}
@@ -117,10 +127,19 @@ h1{margin:0}
   pointer-events:none;
 }
 .empty-hint b{color:var(--ink)}
-/* editorial caption under the stage */
-.stage-note{
-  margin:var(--space-3) 2px 0;color:var(--ink-faint);font-size:var(--text-sm);font-style:italic;letter-spacing:.02em;
+/* editorial header above the stage — big offset title left (hairline underline),
+   italic annotation right: the asymmetric composition from the reference */
+.stage-head{
+  display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-4);
+  margin:0 0 var(--space-4);padding:0 2px;
 }
+.stage-title{
+  margin:0;font-family:var(--display);font-weight:700;font-size:30px;line-height:1;
+  text-transform:uppercase;letter-spacing:.05em;color:#fff;
+  position:relative;padding-bottom:10px;
+}
+.stage-title::after{content:"";position:absolute;left:0;bottom:0;width:44px;height:2px;background:var(--accent)}
+.stage-annot{color:var(--ink-faint);font-size:var(--text-sm);font-style:italic;letter-spacing:.02em;padding-bottom:2px}
 
 /* ---------- Transport ---------- */
 .transport{
@@ -130,7 +149,7 @@ h1{margin:0}
 }
 .time{font-family:var(--display);font-weight:500;letter-spacing:.06em;font-variant-numeric:tabular-nums;color:var(--ink-dim);font-size:var(--text-md);min-width:56px;text-align:center}
 .scrubber{flex:1}
-.btn.play{width:44px;height:44px;border-radius:50%;font-size:16px;padding:0;flex:none}
+.btn.play{width:44px;height:44px;border-radius:0;font-size:16px;padding:0;flex:none}
 
 /* ---------- Cue strip ---------- */
 .cue-strip{
@@ -151,21 +170,21 @@ h1{margin:0}
 .cue-row.edited{background:rgba(255,212,0,.05)}
 .cue-row.edited .x{color:var(--highlight)}
 .cue-row .cue-was{color:var(--ink-dim);font-size:var(--text-xs);font-style:italic;flex:none;display:flex;align-items:center;gap:6px;text-decoration:line-through;opacity:.7}
-.cue-revert{background:transparent;border:1px solid var(--line-strong);color:var(--ink-dim);border-radius:6px;padding:0 6px;font-size:var(--text-sm);line-height:18px;cursor:pointer;text-decoration:none}
+.cue-revert{background:transparent;border:1px solid var(--line-strong);color:var(--ink-dim);border-radius:0;padding:0 6px;font-size:var(--text-sm);line-height:18px;cursor:pointer;text-decoration:none}
 .cue-revert:hover{color:var(--ink);border-color:var(--ink-dim)}
 .cue-row.editing{flex-wrap:wrap;cursor:default;background:var(--panel-2)}
 .cue-edit{flex:1;display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
 .cue-orig{color:var(--ink-dim);font-size:var(--text-sm);text-decoration:line-through;opacity:.65}
 .cue-input{font-size:var(--text-base);padding:8px 10px}
 .cue-edit-actions{display:flex;gap:6px}
-.btn.tiny{padding:5px 13px;font-size:var(--text-sm);border-radius:8px}
+.btn.tiny{padding:5px 13px;font-size:var(--text-sm);border-radius:0}
 
 /* ---------- Tabbed control panel ---------- */
 .panel{display:flex;flex-direction:column;gap:var(--space-3)}
 .tabs{display:flex;flex-wrap:wrap;gap:6px}
 .tab{
   font-family:var(--display);text-transform:uppercase;letter-spacing:.06em;font-size:var(--text-sm);font-weight:500;
-  padding:9px 13px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink-dim);
+  padding:9px 13px;border-radius:0;border:1px solid var(--line);background:var(--panel);color:var(--ink-dim);
   cursor:pointer;min-height:38px;transition:color var(--fast),background var(--fast),border-color var(--fast);
 }
 .tab:hover{color:var(--ink);background:var(--panel-2)}
@@ -226,7 +245,7 @@ select{
 }
 input[type=checkbox]{
   appearance:none;-webkit-appearance:none;width:20px;height:20px;flex:none;padding:0;
-  border-radius:6px;border:1px solid var(--line-strong);background:var(--panel-2);cursor:pointer;
+  border-radius:0;border:1px solid var(--line-strong);background:var(--panel-2);cursor:pointer;
 }
 input[type=checkbox]:checked{
   background-color:var(--accent);border-color:var(--accent);
@@ -235,8 +254,8 @@ input[type=checkbox]:checked{
 }
 input[type=color]{padding:2px;height:34px;width:52px;flex:none;cursor:pointer;border-radius:var(--radius-sm)}
 input[type=color]::-webkit-color-swatch-wrapper{padding:0}
-input[type=color]::-webkit-color-swatch{border:none;border-radius:7px}
-input[type=color]::-moz-color-swatch{border:none;border-radius:7px}
+input[type=color]::-webkit-color-swatch{border:none;border-radius:0}
+input[type=color]::-moz-color-swatch{border:none;border-radius:0}
 input[type=range]{
   appearance:none;-webkit-appearance:none;height:4px;padding:0;border:none;border-radius:99px;
   background:var(--line-strong);cursor:pointer;
@@ -263,7 +282,7 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:var(--space-1) 0}
 /* ---------- Buttons ---------- */
 .btn{
   background:var(--panel-2);color:var(--ink);border:1px solid var(--line-strong);
-  border-radius:10px;padding:10px 15px;font:inherit;font-weight:600;font-size:var(--text-base);cursor:pointer;min-height:40px;
+  border-radius:0;padding:10px 15px;font:inherit;font-weight:600;font-size:var(--text-base);cursor:pointer;min-height:40px;
   display:inline-flex;align-items:center;justify-content:center;gap:8px;
   transition:transform var(--fast) var(--ease),box-shadow var(--fast),background var(--fast),border-color var(--fast);
 }

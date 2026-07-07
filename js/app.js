@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.9.1";
+  const APP_VERSION = "1.9.2";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -1181,7 +1181,8 @@
   // ---------- wiring ----------
   const TIMING_IDS = ["optMaxWords", "optMaxChars", "optMaxDur", "optMaxGap", "optPunct"];
 
-  // Tabbed control panel: one section visible at a time (no long scroll).
+  // Tabbed control panel: closed by default; clicking a tab opens that one
+  // section (and only that one), clicking the open tab again closes it.
   function wireTabs() {
     const tabs = [...document.querySelectorAll(".tab")];
     const panels = [...document.querySelectorAll(".tabpanel")];
@@ -1189,12 +1190,14 @@
       tabs.forEach((t) => t.classList.toggle("is-active", t.dataset.tab === key));
       panels.forEach((p) => p.classList.toggle("is-active", p.dataset.panel === key));
     };
-    tabs.forEach((t) => t.addEventListener("click", () => activate(t.dataset.tab)));
+    tabs.forEach((t) => t.addEventListener("click", () => {
+      activate(t.classList.contains("is-active") ? null : t.dataset.tab);
+    }));
   }
-  // Jump to a panel by key (e.g. surface the Export tab when an export starts).
+  // Open a panel by key (e.g. surface the Export tab when needed).
   function showTab(key) {
     const t = document.querySelector(`.tab[data-tab="${key}"]`);
-    if (t) t.click();
+    if (t && !t.classList.contains("is-active")) t.click();
   }
 
   function wire() {
