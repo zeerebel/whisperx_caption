@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.7.0";
+  const APP_VERSION = "1.7.1";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -719,11 +719,23 @@
   // Single-threaded core → no SharedArrayBuffer, so NO COOP/COEP headers are
   // needed and Google-Fonts loading is unaffected. Loaded only on first click.
   let ffmpegInstance = null;
+  const ffLogRing = [];   // recent ffmpeg stderr lines, kept so a failure can be diagnosed
+  let onFfFrame = null;   // optional callback fed the "frame=N" progress during exec
   const FF = {
     ffmpeg: "https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js",
     util: "https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js",
     coreJs: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js",
     coreWasm: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm",
+  };
+  // In-browser .mov codecs. QuickTime Animation (qtrle, 8-bit RGBA) is the
+  // default: for caption-over-transparent frames it's ~20× faster and ~10×
+  // smaller than ProRes 4444 in the single-threaded wasm core, still lossless
+  // true alpha, and read by every NLE. ProRes 4444 stays available but is
+  // heavy enough in-browser to stall or run out of memory on long/4K clips —
+  // for that, the PNG sequence + "Copy ffmpeg command" (native ffmpeg) is best.
+  const MOV_CODECS = {
+    qtrle:  { label: "QuickTime Animation, RGBA", args: ["-c:v", "qtrle", "-pix_fmt", "argb"] },
+    prores: { label: "ProRes 4444", args: ["-c:v", "prores_ks", "-profile:v", "4444", "-vendor", "apl0", "-pix_fmt", "yuva444p10le"] },
   };
   function loadScriptOnce(src) {
     return new Promise((resolve, reject) => {
@@ -741,6 +753,14 @@
     const { FFmpeg } = window.FFmpegWASM;
     const { toBlobURL } = window.FFmpegUtil;
     const ff = new FFmpeg();
+    // Keep the tail of ffmpeg's log so a failed encode can be diagnosed (e.g.
+    // an out-of-memory abort), and surface "frame=N" as live encode progress.
+    ff.on("log", ({ message }) => {
+      ffLogRing.push(message);
+      if (ffLogRing.length > 60) ffLogRing.shift();
+      const m = /frame=\s*(\d+)/.exec(message);
+      if (m && onFfFrame) onFfFrame(+m[1]);
+    });
     const coreURL = await toBlobURL(FF.coreJs, "text/javascript");
     const wasmURL = await toBlobURL(FF.coreWasm, "application/wasm");
     await ff.load({ coreURL, wasmURL });
@@ -756,8 +776,13 @@
     const { w, h } = exportRes();
     const fps = exportFps();
     const frameCount = Math.max(1, Math.round(state.duration * fps));
-    if (frameCount * w * h > 1920 * 1080 * 600 &&
-        !confirm(`${frameCount} frames at ${w}×${h} is large for in-browser encoding and may run out of memory.\n\nTip: lower the FPS/resolution or trim the clip. Continue?`))
+    const codecSel = ($("optMovCodec") && $("optMovCodec").value) || "qtrle";
+    const codec = MOV_CODECS[codecSel] || MOV_CODECS.qtrle;
+    // ProRes 4444 is far heavier in the wasm core, so warn much sooner for it
+    // than for the light Animation codec (thresholds are frames × pixels).
+    const budget = (codecSel === "prores" ? 300 : 1200) * 1920 * 1080;
+    if (frameCount * w * h > budget &&
+        !confirm(`${frameCount} frames at ${w}×${h} as ${codec.label} is a large in-browser encode and may be slow or run out of memory.\n\nTip: lower the FPS/resolution, trim the clip, or use the PNG sequence + “Copy ffmpeg command”. Continue?`))
       return;
     const style = buildRenderStyle();
     const anim = readAnim();
@@ -794,7 +819,8 @@
           await new Promise((r) => setTimeout(r, 0));
         }
       }
-      $("exportProgress").textContent = "Encoding transparent ProRes 4444 .mov…";
+      $("exportProgress").textContent = `Encoding transparent .mov (${codec.label})…`;
+      ffLogRing.length = 0;
       // A wedged encode would otherwise spin forever. Give it a budget that
       // scales with the clip, then kill the worker; Cancel uses the same kill.
       // A terminated FFmpeg instance is dead, so drop it and reload next time.
@@ -802,33 +828,49 @@
       const killEncoder = () => { terminated = true; ffmpegInstance = null; try { ff.terminate(); } catch (err) {} };
       cancelHook = killEncoder;
       const stallTimer = setTimeout(killEncoder, timeoutMs);
+      // ffmpeg reports "frame=N" as it encodes — mirror it so a multi-second
+      // (or multi-minute) encode shows progress instead of looking frozen.
+      onFfFrame = (n) => { if (!terminated) $("exportProgress").textContent = `Encoding transparent .mov — frame ${Math.min(n, frameCount)} / ${frameCount} (${codec.label})…`; };
       try {
-        await ff.exec(["-framerate", String(fps), "-i", "cap_%05d.png",
-          "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le", "out.mov"]);
+        await ff.exec(["-framerate", String(fps), "-i", "cap_%05d.png", ...codec.args, "out.mov"]);
       } catch (e) {
         if (exportCancelled) throw CANCEL;
-        if (terminated) throw new Error(`the encoder stalled (no result after ${Math.round(timeoutMs / 60000)} min) and was stopped`);
+        if (terminated) throw new Error(`the encoder stopped after ${Math.round(timeoutMs / 60000)} min — lower the resolution/FPS or shorten the clip, or export the PNG sequence.`);
         throw e;
       } finally {
         clearTimeout(stallTimer);
         cancelHook = null;
+        onFfFrame = null;
       }
       checkCancel();
-      const data = await ff.readFile("out.mov");
-      if (!data || !data.length) throw new Error("no output — this encoder build may lack ProRes; use the PNG sequence instead.");
+      let data = null;
+      try { data = await ff.readFile("out.mov"); } catch (err) { data = null; }
+      if (!data || !data.length) {
+        // The encoder wrote nothing — on this single-threaded wasm core that's
+        // almost always an out-of-memory abort on a long/high-res clip. The
+        // aborted core is unusable, so drop it and reload fresh next time.
+        ffmpegInstance = null;
+        const oom = ffLogRing.some((l) => /out of memory|cannot enlarge|memory access|abort|killed|malloc|bad_alloc/i.test(l));
+        throw new Error(oom
+          ? "the in-browser encoder ran out of memory at this size. Lower the resolution/FPS or shorten the clip — or export the PNG sequence and use “Copy ffmpeg command” for a ProRes .mov."
+          : "the encoder produced no output. Lower the resolution/FPS or shorten the clip — or use the PNG sequence + “Copy ffmpeg command”.");
+      }
       WXC.zip.downloadBlob(new Blob([data], { type: "video/quicktime" }), `${baseName()}_${w}x${h}_alpha.mov`);
-      $("exportProgress").textContent = `✓ Transparent .mov exported (${w}×${h}, ${fps}fps, ProRes 4444)`;
+      $("exportProgress").textContent = `✓ Transparent .mov exported (${w}×${h}, ${fps}fps, ${codec.label})`;
       toast("✓ Transparent .mov exported");
     } catch (e) {
       if (e === CANCEL) reportExportError(e, "");
       else {
-        $("exportProgress").textContent = "⚠️ .mov encode failed: " + e.message + " — the PNG sequence + Copy ffmpeg command is the reliable path.";
-        toast("⚠️ .mov encode failed");
+        ffmpegInstance = null; // a failed/aborted core can't be trusted — reload on next try
+        $("exportProgress").textContent = "⚠️ .mov export failed: " + e.message;
+        toast("⚠️ .mov export failed");
       }
     } finally {
-      // drain the virtual FS (frames + any partial out.mov) and the canvas —
-      // unless the worker was terminated, which already freed everything
-      if (!terminated) {
+      // Drain the virtual FS (frames + any partial out.mov) and the canvas —
+      // but ONLY if this core is still the live instance. A terminated or
+      // OOM-aborted core is dropped (ffmpegInstance nulled) and won't answer
+      // deleteFile, so touching it here would hang the whole export.
+      if (ffmpegInstance === ff) {
         for (const n of names) { try { await ff.deleteFile(n); } catch (err) {} }
         try { await ff.deleteFile("out.mov"); } catch (err) {}
       }
@@ -869,7 +911,7 @@
     "optAnim", "optAnimSpeed", "optAnimIntensity",
     "optVAlign", "optHAlign", "optMarginX", "optMarginY", "optMaxWidth",
     "optMaxWords", "optMaxChars", "optMaxDur", "optMaxGap", "optPunct",
-    "optExportKaraoke", "optBgMode", "optChroma", "optChromaCustom", "optRes", "optFps",
+    "optExportKaraoke", "optBgMode", "optChroma", "optChromaCustom", "optRes", "optFps", "optMovCodec",
   ];
   // Snapshot every style control into a plain object (the shape a preset stores).
   function captureStyle() {
