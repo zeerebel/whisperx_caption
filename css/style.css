@@ -226,6 +226,8 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:var(--space-1) 0}
 .btn.primary:hover:not(:disabled){background:linear-gradient(180deg,#79a2ff,#6690ff)}
 .btn.ghost{background:transparent}
 .btn.ghost:hover:not(:disabled){background:var(--panel-2)}
+.btn.donate{background:linear-gradient(180deg,#ff6b8b,#ff4d73);color:#fff;border-color:transparent;box-shadow:var(--e2),inset 0 1px 0 rgba(255,255,255,.25)}
+.btn.donate:hover:not(:disabled){background:linear-gradient(180deg,#ff85a0,#ff5f82)}
 .btn.wide{width:100%}
 a.btn{text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
 .export-row{display:flex;gap:var(--space-2);flex-wrap:wrap}
