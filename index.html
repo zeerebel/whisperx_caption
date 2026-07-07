@@ -27,6 +27,10 @@
   <main class="layout">
     <!-- ============ STAGE / PREVIEW ============ -->
     <section class="stage-col">
+      <div class="stage-head">
+        <h2 class="stage-title">Live Preview</h2>
+        <span class="stage-annot">- what you see is what you export</span>
+      </div>
       <div id="dropzone" class="dropzone">
         <div class="stage-wrap" id="stageWrap">
           <div id="stage" class="stage">
@@ -39,7 +43,6 @@
           </div>
         </div>
       </div>
-      <p class="stage-note">Live preview — what you see is exactly what you export.</p>
 
       <div class="transport">
         <button id="playBtn" class="btn play" type="button" aria-label="Play/Pause" disabled>▶</button>
@@ -53,8 +56,21 @@
 
     <!-- ============ CONTROL PANEL ============ -->
     <aside class="panel">
-      <details class="group" open>
-        <summary>1 · Source</summary>
+      <nav class="tabs" role="tablist" aria-label="Controls">
+        <button class="tab" type="button" data-tab="source" role="tab">Source</button>
+        <button class="tab" type="button" data-tab="grouping" role="tab">Grouping</button>
+        <button class="tab" type="button" data-tab="type" role="tab">Type</button>
+        <button class="tab" type="button" data-tab="color" role="tab">Color</button>
+        <button class="tab" type="button" data-tab="anim" role="tab">Animation</button>
+        <button class="tab" type="button" data-tab="layout" role="tab">Layout</button>
+        <button class="tab" type="button" data-tab="bg" role="tab">Background</button>
+        <button class="tab" type="button" data-tab="export" role="tab">Export</button>
+        <button class="tab" type="button" data-tab="presets" role="tab">Presets</button>
+      </nav>
+      <div class="tabpanels">
+
+      <section class="tabpanel" id="tab-source" data-panel="source" role="tabpanel">
+        <h2 class="panel-title">1 · Source</h2>
         <div class="group-body">
           <label class="filepick">
             <span>Transcript (WhisperX .json / .srt / .vtt)</span>
@@ -66,10 +82,10 @@
           </label>
           <p id="srcInfo" class="hint">No transcript loaded.</p>
         </div>
-      </details>
+      </section>
 
-      <details class="group">
-        <summary>2 · Line grouping</summary>
+      <section class="tabpanel" id="tab-grouping" data-panel="grouping" role="tabpanel">
+        <h2 class="panel-title">2 · Line grouping</h2>
         <div class="group-body grid2">
           <label>Max words / line<input id="optMaxWords" type="number" min="1" max="20" value="7" /></label>
           <label>Max chars / line<input id="optMaxChars" type="number" min="8" max="80" value="38" /></label>
@@ -77,10 +93,10 @@
           <label>Split on gap ≥ (s)<input id="optMaxGap" type="number" min="0.1" max="4" step="0.05" value="0.7" /></label>
           <label class="check"><input id="optPunct" type="checkbox" checked /> Break on sentence end (. ? !)</label>
         </div>
-      </details>
+      </section>
 
-      <details class="group" open>
-        <summary>3 · Type</summary>
+      <section class="tabpanel" id="tab-type" data-panel="type" role="tabpanel">
+        <h2 class="panel-title">3 · Type</h2>
         <div class="group-body">
           <label class="wide">Font
             <select id="optFont"></select>
@@ -107,10 +123,10 @@
             </select>
           </label>
         </div>
-      </details>
+      </section>
 
-      <details class="group" open>
-        <summary>4 · Color &amp; effect</summary>
+      <section class="tabpanel" id="tab-color" data-panel="color" role="tabpanel">
+        <h2 class="panel-title">4 · Color &amp; effect</h2>
         <div class="group-body">
           <div class="grid2">
             <label class="color">Text<input id="optColor" type="color" value="#ffffff" /></label>
@@ -131,10 +147,10 @@
             <label class="color">Shadow color<input id="optShadowColor" type="color" value="#000000" /></label>
           </div>
         </div>
-      </details>
+      </section>
 
-      <details class="group" open>
-        <summary>5 · Animation</summary>
+      <section class="tabpanel" id="tab-anim" data-panel="anim" role="tabpanel">
+        <h2 class="panel-title">5 · Animation</h2>
         <div class="group-body">
           <label class="wide">Effect<select id="optAnim"></select></label>
           <div class="grid2">
@@ -143,10 +159,10 @@
           </div>
           <p class="hint">Effects play when a caption appears. Scrub or press play to preview.</p>
         </div>
-      </details>
+      </section>
 
-      <details class="group">
-        <summary>6 · Layout</summary>
+      <section class="tabpanel" id="tab-layout" data-panel="layout" role="tabpanel">
+        <h2 class="panel-title">6 · Layout</h2>
         <div class="group-body grid2">
           <label>Vertical
             <select id="optVAlign"><option value="top">Top</option><option value="middle">Middle</option><option value="bottom" selected>Bottom</option></select>
@@ -158,10 +174,10 @@
           <label>Edge margin %<input id="optMarginY" type="number" min="0" max="45" value="10" /></label>
           <label>Max width %<input id="optMaxWidth" type="number" min="30" max="100" value="84" /></label>
         </div>
-      </details>
+      </section>
 
-      <details class="group">
-        <summary>7 · Background</summary>
+      <section class="tabpanel" id="tab-bg" data-panel="bg" role="tabpanel">
+        <h2 class="panel-title">7 · Background</h2>
         <div class="group-body">
           <label class="wide">Mode
             <select id="optBgMode">
@@ -182,10 +198,10 @@
           <input id="fileBg" type="file" accept="image/*" class="hidden" />
           <p class="hint">Transparent = true alpha, exported in the PNG sequence for overlaying in any editor. Solid color = for keying out an opaque video.</p>
         </div>
-      </details>
+      </section>
 
-      <details class="group" open>
-        <summary>8 · Export</summary>
+      <section class="tabpanel" id="tab-export" data-panel="export" role="tabpanel">
+        <h2 class="panel-title">8 · Export</h2>
         <div class="group-body">
           <p class="hint"><b>Overlay video</b> (with alpha) → PNG sequence. <b>Text captions</b> → SRT / VTT / ASS.</p>
           <div class="grid2">
@@ -226,10 +242,10 @@
           </div>
           <button id="copyFfmpeg" class="btn ghost wide" type="button" disabled>Copy ffmpeg command (burn-in / PNG→ProRes)</button>
         </div>
-      </details>
+      </section>
 
-      <details class="group">
-        <summary>Presets</summary>
+      <section class="tabpanel" id="tab-presets" data-panel="presets" role="tabpanel">
+        <h2 class="panel-title">Presets</h2>
         <div class="group-body">
           <label class="wide">Preset
             <select id="presetSelect"></select>
@@ -249,7 +265,8 @@
             current style; <b>Export pack</b> downloads all your presets as one file to share or back up.
             Your working style also auto-saves in this browser.</p>
         </div>
-      </details>
+      </section>
+          </div>
     </aside>
   </main>
 
