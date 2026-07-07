@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.7.2";
+  const APP_VERSION = "1.8.0";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -501,13 +501,40 @@
   }
 
   // ---------- text exports ----------
-  function download(name, text, mime) {
-    const blob = new Blob([text], { type: mime || "text/plain;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  // ---------- saving files (native "Save As" when available) ----------
+  // showSaveFilePicker (Chrome/Edge) lets the user name and place the file. It
+  // MUST run during the click gesture, so long exports grab a handle up front
+  // and write to it when finished. Everywhere else falls back to a normal
+  // auto-named download.
+  async function pickSaveHandle(suggestedName, accept) {
+    if (typeof window.showSaveFilePicker !== "function") return null;
+    try {
+      return await window.showSaveFilePicker({
+        suggestedName,
+        types: accept ? [{ description: "File", accept }] : undefined,
+      });
+    } catch (e) {
+      if (e && e.name === "AbortError") return "cancel"; // user dismissed the dialog
+      return null;                                       // unsupported/blocked → fall back
+    }
+  }
+  async function saveOrDownload(handle, blob, name) {
+    if (handle) {
+      try { const w = await handle.createWritable(); await w.write(blob); await w.close(); return; }
+      catch (e) { toast("⚠️ Couldn't save there — downloading instead"); }
+    }
+    WXC.zip.downloadBlob(blob, name);
+  }
+  // Instant exports (text, single frame): pick + write in one call. Returns
+  // false only if the user cancelled the save dialog.
+  async function saveBlobNow(blob, name, accept) {
+    const h = await pickSaveHandle(name, accept);
+    if (h === "cancel") return false;
+    await saveOrDownload(h, blob, name);
+    return true;
+  }
+  async function download(name, text, mime) {
+    await saveBlobNow(new Blob([text], { type: mime || "text/plain;charset=utf-8" }), name);
   }
   function baseName() { return (state.baseName || "captions").replace(/\.[^.]+$/, ""); }
   function setExportEnabled(on) {
@@ -639,6 +666,10 @@
     let t = state.t;
     let cue = cueAt(t);
     if (!cue) { cue = state.cues[0]; t = (cue.start + cue.end) / 2; }
+    const name = `${baseName()}_frame.png`;
+    // Prompt for the save location first, while we still hold the click gesture.
+    const handle = await pickSaveHandle(name, { "image/png": [".png"] });
+    if (handle === "cancel") return;
     const style = buildRenderStyle();
     await ensureFontsForExport(style, h);
     const off = document.createElement("canvas");
@@ -647,8 +678,7 @@
     WXC.render.drawCaption(octx, cue, style, t, w, h, readAnim());
     off.toBlob((b) => {
       if (!b) return toast("⚠️ PNG export failed (resolution too large?)");
-      WXC.zip.downloadBlob(b, `${baseName()}_frame.png`);
-      toast("✓ Transparent PNG exported");
+      saveOrDownload(handle, b, name).then(() => toast("✓ Transparent PNG exported"));
     }, "image/png");
   }
 
@@ -662,6 +692,9 @@
     const bg = bgColor() || "#000000";
     if (!bgColor())
       toast("Tip: WebM can't store alpha — set Background to a Solid color to key it out.");
+    const webmName = `${baseName()}_${w}x${h}_chroma.webm`;
+    const saveHandle = await pickSaveHandle(webmName, { "video/webm": [".webm"] });
+    if (saveHandle === "cancel") return; // user dismissed the save dialog
     const style = buildRenderStyle();
     const anim = readAnim();
     setExportBusy(true);
@@ -700,8 +733,7 @@
       mr.stop();
       await stopped;
       checkCancel(); // cancelled mid-recording → drop the partial capture
-      const blob = new Blob(chunks, { type: "video/webm" });
-      WXC.zip.downloadBlob(blob, `${baseName()}_${w}x${h}_chroma.webm`);
+      await saveOrDownload(saveHandle, new Blob(chunks, { type: "video/webm" }), webmName);
       $("exportProgress").textContent = "✓ WebM exported (opaque — key out the background)";
       toast("✓ WebM exported");
     } catch (e) {
@@ -823,11 +855,16 @@
     if (frameCount * w * h > budget &&
         !confirm(`${frameCount} frames at ${w}×${h} as ${codec.label} is a large in-browser encode and may be slow or run out of memory.\n\nTip: lower the FPS/resolution, trim the clip, or use the PNG sequence + “Copy ffmpeg command”. Continue?`))
       return;
+    // Ask where to save now, while the click gesture is still live; we write to
+    // it once encoding finishes.
+    const movName = `${baseName()}_${w}x${h}_alpha.mov`;
+    const saveHandle = await pickSaveHandle(movName, { "video/quicktime": [".mov"] });
+    if (saveHandle === "cancel") return; // user dismissed the save dialog
     const style = buildRenderStyle();
     const anim = readAnim();
     setExportBusy(true);
     pause();
-    $("exportProgress").textContent = "Loading the in-browser encoder (first time downloads ~30 MB)…";
+    $("exportProgress").textContent = "Loading the in-browser encoder (first time downloads ~10 MB)…";
     let ff;
     try {
       ff = await ensureFFmpeg();
@@ -894,7 +931,7 @@
           ? "the in-browser encoder ran out of memory at this size. Lower the resolution/FPS or shorten the clip — or export the PNG sequence and use “Copy ffmpeg command” for a ProRes .mov."
           : "the encoder produced no output. Lower the resolution/FPS or shorten the clip — or use the PNG sequence + “Copy ffmpeg command”.");
       }
-      WXC.zip.downloadBlob(new Blob([data], { type: "video/quicktime" }), `${baseName()}_${w}x${h}_alpha.mov`);
+      await saveOrDownload(saveHandle, new Blob([data], { type: "video/quicktime" }), movName);
       $("exportProgress").textContent = `✓ Transparent .mov exported (${w}×${h}, ${fps}fps, ${codec.label})`;
       toast("✓ Transparent .mov exported");
     } catch (e) {
