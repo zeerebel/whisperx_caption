@@ -204,8 +204,14 @@
             <button id="dlPngFrame" class="btn" type="button" disabled>Single frame .png</button>
             <button id="dlWebm" class="btn" type="button" disabled>.webm (chroma)</button>
           </div>
-          <button id="dlMov" class="btn wide" type="button" disabled>⬇ Transparent .mov — one click (in-browser, beta)</button>
-          <p class="hint">Renders a true-alpha ProRes 4444 <b>.mov</b> right here — drops over footage in any editor, no keying. First use downloads the encoder (~30&nbsp;MB), then it's cached.</p>
+          <label class="wide">Transparent .mov format
+            <select id="optMovCodec">
+              <option value="qtrle" selected>QuickTime Animation — RGBA, fast (recommended)</option>
+              <option value="prores">ProRes 4444 — heavier, may stall on long / 4K clips</option>
+            </select>
+          </label>
+          <button id="dlMov" class="btn wide" type="button" disabled>⬇ Transparent .mov — one click (in-browser)</button>
+          <p class="hint">Renders a true-alpha <b>.mov</b> right here — drops over footage in any editor, no keying. <b>Animation (RGBA)</b> is fast and reliable for captions; <b>ProRes 4444</b> is heavier in-browser and best made from the PNG sequence via “Copy ffmpeg command”. First use downloads the encoder (~30&nbsp;MB), then it's cached.</p>
           <button id="exportCancel" class="btn ghost wide hidden" type="button">✕ Cancel export</button>
           <p id="exportProgress" class="hint"></p>
           <hr class="sep" />
