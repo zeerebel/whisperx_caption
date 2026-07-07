@@ -2,7 +2,32 @@
 
 It's a static site (HTML/CSS/JS, no build step), so any static host works.
 
-## Cloudflare Pages (recommended)
+## Cloudflare Workers (auto-deploy on push — set up in this repo)
+
+`wrangler.toml` and `.github/workflows/deploy.yml` are already committed, wired
+to deploy a Worker named `whisperxcaption` (static assets) on every push to
+`main`. To turn it on:
+
+1. **Create a Cloudflare API token**: dashboard → your profile icon (top
+   right) → **My Profile** → **API Tokens** → **Create Token** → use the
+   **Edit Cloudflare Workers** template → scope it to your account → **Create
+   Token**, then copy it (shown once).
+2. **Find your Account ID**: dashboard → **Workers & Pages** → the Account ID
+   is in the right-hand sidebar of the overview page.
+3. In the GitHub repo → **Settings** → **Secrets and variables** → **Actions**
+   → **New repository secret**, add two secrets:
+   - `CLOUDFLARE_API_TOKEN` — the token from step 1
+   - `CLOUDFLARE_ACCOUNT_ID` — the ID from step 2
+4. Push to `main` (or re-run the workflow from the **Actions** tab) — it
+   deploys automatically from then on.
+
+If your existing `whisperxcaption.fusionmma.workers.dev` site was actually
+created as a **Pages** project instead (check whether it's listed under
+*Pages* rather than *Workers* in the dashboard), swap the workflow step's
+command to `wrangler pages deploy . --project-name=whisperxcaption` and drop
+`wrangler.toml`'s `[assets]` block — ask for help updating this if so.
+
+## Cloudflare Pages (dashboard Git integration, no repo changes needed)
 
 1. Push this repo to GitHub (already done if you're reading this there).
 2. In the Cloudflare dashboard → **Workers & Pages** → **Create** → **Pages** →
