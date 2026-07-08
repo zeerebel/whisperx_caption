@@ -141,12 +141,16 @@ h1{margin:0}
   content:"";position:absolute;inset:0;z-index:4;pointer-events:none;border-radius:inherit;
   box-shadow:inset 0 0 120px -30px rgba(0,0,0,.9),inset 0 0 0 1px rgba(255,255,255,.04);
 }
+/* Centered as normal flowing text — NOT display:flex, which would turn each
+   text fragment and <b> into separate flex items that scatter/overflow on
+   narrow phones. Vertically centered via top:50% + translate. */
 .empty-hint{
-  position:absolute;inset:0;z-index:3;margin:auto;display:flex;align-items:center;justify-content:center;
-  text-align:center;padding:var(--space-6);color:var(--ink-dim);font-size:var(--text-md);line-height:1.8;
-  pointer-events:none;
+  position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);z-index:3;
+  text-align:center;padding:0 var(--space-5);color:var(--ink-dim);
+  font-size:var(--text-md);line-height:1.7;pointer-events:none;
+  overflow-wrap:break-word;
 }
-.empty-hint b{color:var(--ink)}
+.empty-hint b{color:var(--ink);white-space:nowrap}
 /* editorial header above the stage — big offset title left (hairline underline),
    italic annotation right: the asymmetric composition from the reference */
 .stage-head{
@@ -361,8 +365,12 @@ a.btn{text-decoration:none}
   .topbar-actions .btn{flex:1;min-width:0;padding:10px 8px;font-size:var(--text-sm)}
   .group>summary{font-size:var(--text-md)}
   .stage-col{margin-bottom:var(--space-2)}
+  /* the 16:9 stage is short on phones — shrink the drop hint so it fits */
+  .empty-hint{font-size:var(--text-sm);line-height:1.55;padding:0 var(--space-4)}
+  .stage-title{font-size:24px}
 }
 @media (max-width:380px){
   .brand h1{font-size:17px}
+  .empty-hint{font-size:var(--text-xs)}
   .export-row .btn{min-width:0}
 }

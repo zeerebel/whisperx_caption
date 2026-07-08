@@ -4,6 +4,11 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.9.4 — Real backdrop art
+- Replaced the placeholder backdrop with the neon portrait artwork supplied
+  by the author (assets/backdrop.jpg). Same layer system: gradient veil at
+  ~15%, frosted translucent surfaces on top.
+
 ## v1.9.3 — Backdrop image, translucent surfaces, themed donate button
 - Full-page **backdrop image** layer (`assets/backdrop.jpg` — swap that file
   for your own art; it's cover-fitted). A dark **gradient veil** sits over it
