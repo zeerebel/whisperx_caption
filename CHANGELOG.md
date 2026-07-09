@@ -4,6 +4,24 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.9.6 — Faster long exports (identical output)
+- **Frame de-duplication in the PNG-sequence and `.mov` exporters.** A frame is
+  re-encoded only when its pixels actually change: every transparent gap reuses
+  a single blank frame, and for a plain (no animation, no karaoke, no
+  active-word pill) style every frame within a caption reuses one encode. On a
+  long, plain-subtitle export this turns tens of thousands of PNG encodes into
+  roughly one per caption. Output is **byte-identical** to encoding every frame;
+  the moment any animated/karaoke feature is on, it falls back to a fresh encode
+  per frame.
+- The in-memory ZIP fallback now collects encoded bytes directly (and, for
+  static exports, holds only the few unique buffers), so it's lighter on memory.
+- **Yield on a wall-clock cadence (~100 ms)** during export instead of every few
+  frames — `setTimeout(0)` is clamped to ~4 ms in a tight loop, so per-frame
+  yielding added real idle time to long renders. Progress still updates smoothly.
+
+## v1.9.5 — Mobile drop-hint fix
+- Fixed scrambled drop-zone hint text at phone widths.
+
 ## v1.9.4 — Real backdrop art
 - Replaced the placeholder backdrop with the neon portrait artwork supplied
   by the author (assets/backdrop.jpg). Same layer system: gradient veil at

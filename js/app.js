@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.9.5";
+  const APP_VERSION = "1.9.6";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -576,6 +576,17 @@
     } catch (e) {}
   }
 
+  // A frame's pixels change between frames only when something time-varying is on:
+  // any motion animation, the karaoke color sweep, or the active-word pill. With all
+  // three off, every frame inside a given cue is byte-identical and every gap frame is
+  // blank — so we encode each unique frame once and reuse the bytes. On a long, plain
+  // (non-animated, non-karaoke) subtitle export that collapses thousands of PNG encodes
+  // into a handful, and the output is bit-identical to encoding every frame. The moment
+  // any dynamic feature is on we fall straight back to a fresh encode per frame.
+  function framesAreStatic(style, anim) {
+    return (!anim || anim.id === "none") && !style.karaoke && !style.activePill;
+  }
+
   async function exportPngSequence() {
     if (!state.cues.length || state.exporting) return;
     const { w, h } = exportRes();
@@ -613,19 +624,36 @@
     const off = document.createElement("canvas");
     off.width = w; off.height = h;
     const octx = off.getContext("2d", { alpha: true });
-    const frames = [];
     const zw = writable ? WXC.zip.createZipStream((bytes) => writable.write(bytes)) : null;
+    const files = zw ? null : [];   // in-memory fallback collects {name, data} for createStoreZip
+    const staticFrames = framesAreStatic(style, anim);
+    let blankBytes = null, lastCue = undefined, lastCueBytes = null, lastTick = 0;
     try {
       for (let i = 0; i < frameCount; i++) {
         checkCancel();
         const t = i / fps;
-        WXC.render.drawCaption(octx, cueAt(t), style, t, w, h, anim);
-        const blob = await new Promise((res) => off.toBlob(res, "image/png"));
-        if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
+        const cue = cueAt(t);
+        let bytes;
+        if (!cue && blankBytes) {
+          bytes = blankBytes;                                   // reuse the one blank frame across every gap
+        } else if (staticFrames && cue && cue === lastCue && lastCueBytes) {
+          bytes = lastCueBytes;                                 // reuse this cue's frame while nothing moves
+        } else {
+          WXC.render.drawCaption(octx, cue, style, t, w, h, anim);
+          const blob = await new Promise((res) => off.toBlob(res, "image/png"));
+          if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
+          bytes = new Uint8Array(await blob.arrayBuffer());
+          if (!cue) blankBytes = bytes;
+          else if (staticFrames) { lastCue = cue; lastCueBytes = bytes; }
+        }
         const name = `cap_${String(i).padStart(5, "0")}.png`;
-        if (zw) await zw.add(name, new Uint8Array(await blob.arrayBuffer()));
-        else frames.push({ name, blob });
-        if (i % 4 === 0) {
+        if (zw) await zw.add(name, bytes);
+        else files.push({ name, data: bytes });
+        // Yield on a wall-clock cadence (~10×/s) instead of every N frames: setTimeout(0)
+        // is clamped to ~4ms in a tight loop, so per-frame yielding taxes long exports.
+        const now = performance.now();
+        if (now - lastTick > 100) {
+          lastTick = now;
           $("exportProgress").textContent = `Rendering frame ${i + 1} / ${frameCount}…`;
           await new Promise((r) => setTimeout(r, 0));
         }
@@ -644,9 +672,9 @@
         await writable.close();
         writable = null;
       } else {
-        frames.push({ name: "README.txt", blob: new Blob([readme], { type: "text/plain" }) });
+        files.push({ name: "README.txt", data: new TextEncoder().encode(readme) });
         $("exportProgress").textContent = "Packaging .zip…";
-        const zip = await WXC.zip.createStoreZipFromBlobs(frames);
+        const zip = WXC.zip.createStoreZip(files);
         WXC.zip.downloadBlob(zip, zipName);
       }
       $("exportProgress").textContent = `✓ ${frameCount} transparent frames exported`;
@@ -881,16 +909,33 @@
     try {
       await ensureFontsForExport(style, h);
       const octx = off.getContext("2d", { alpha: true });
+      const staticFrames = framesAreStatic(style, anim);
+      let blankBytes = null, lastCue = undefined, lastCueBytes = null, lastTick = 0;
       for (let i = 0; i < frameCount; i++) {
         checkCancel();
         const t = i / fps;
-        WXC.render.drawCaption(octx, cueAt(t), style, t, w, h, anim);
-        const blob = await new Promise((res) => off.toBlob(res, "image/png"));
-        if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
+        const cue = cueAt(t);
+        let bytes;
+        if (!cue && blankBytes) {
+          bytes = blankBytes;                                   // reuse the one blank frame across every gap
+        } else if (staticFrames && cue && cue === lastCue && lastCueBytes) {
+          bytes = lastCueBytes;                                 // reuse this cue's frame while nothing moves
+        } else {
+          WXC.render.drawCaption(octx, cue, style, t, w, h, anim);
+          const blob = await new Promise((res) => off.toBlob(res, "image/png"));
+          if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
+          bytes = new Uint8Array(await blob.arrayBuffer());
+          if (!cue) blankBytes = bytes;
+          else if (staticFrames) { lastCue = cue; lastCueBytes = bytes; }
+        }
+        // ffmpeg still needs one file per frame (gap-free sequence); reuse skips only
+        // the expensive re-encode, not the (cheap) write of identical bytes.
         const name = `cap_${String(i).padStart(5, "0")}.png`;
-        await ff.writeFile(name, new Uint8Array(await blob.arrayBuffer()));
+        await ff.writeFile(name, bytes);
         names.push(name);
-        if (i % 4 === 0) {
+        const now = performance.now();
+        if (now - lastTick > 100) {
+          lastTick = now;
           $("exportProgress").textContent = `Rendering frame ${i + 1} / ${frameCount}…`;
           await new Promise((r) => setTimeout(r, 0));
         }
