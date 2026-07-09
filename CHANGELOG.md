@@ -4,6 +4,30 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.11.0 — Cloud Transcribe (beta)
+- New **☁ Cloud Transcribe** panel in the Source tab: upload audio or video
+  (mp3/wav/m4a/mp4…) and it's transcribed on a GPU, then loads straight into
+  the app — no local WhisperX install needed. Word-level timing (for karaoke)
+  is on by default; language can be auto-detected or forced.
+- Added a **Cloudflare Worker** (`worker/index.js`) that runs Replicate
+  WhisperX **server-side**, so the Replicate token never touches the browser.
+  The static site is unchanged — assets are still served directly; the Worker
+  only handles `/api/*`.
+- **Passphrase-gated** so the endpoint can't be abused to burn GPU credits, and
+  it's fully inert until the owner sets `REPLICATE_API_TOKEN` +
+  `TRANSCRIBE_PASSPHRASE` secrets — until then the app stays 100% free/static.
+- Setup + security notes in `docs/CLOUD_TRANSCRIBE.md`.
+
+## v1.10.3 — Hero styling on the one-click .mov export
+- The **⬇ Transparent .mov — one click** button (`#dlMov`) is now the visual
+  hero of the Export tab: brighter electric-cyan gradient, taller, with a soft
+  accent glow that gently breathes to draw the eye. It's the flagship action
+  (true-alpha overlay in one click), so it should be the obvious thing to press.
+- Stays in the cool accent family so it doesn't fight the palette; the glow +
+  size set it apart from the flat-blue PNG-sequence button.
+- Glow and breathing are disabled while the button is (dimmed and inert until a
+  transcript loads) and honor `prefers-reduced-motion`.
+
 ## v1.9.4 — Real backdrop art
 - Replaced the placeholder backdrop with the neon portrait artwork supplied
   by the author (assets/backdrop.jpg). Same layer system: gradient veil at

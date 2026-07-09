@@ -1,5 +1,11 @@
 name = "whisperxcaption"
 compatibility_date = "2024-09-23"
 
+# Cloud Transcribe API. With `main` set, static assets are still served
+# directly by Cloudflare for any path that matches a file; the Worker is only
+# invoked for unmatched paths (i.e. /api/*). See worker/index.js.
+main = "worker/index.js"
+
 [assets]
 directory = "."
+binding = "ASSETS"

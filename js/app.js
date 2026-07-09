@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.10.2";
+  const APP_VERSION = "1.11.0";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -1214,9 +1214,86 @@
     });
   }
 
+  // ---------- Cloud Transcribe ----------
+  // Upload audio/video → our Cloudflare Worker runs Replicate WhisperX
+  // (server-side) → the returned WhisperX JSON flows into loadTranscriptText,
+  // same as a dropped .json. Passphrase-gated so it can't be abused. The whole
+  // block is inert unless the site owner has deployed the Worker + secrets.
+  function wireCloudTranscribe() {
+    const btn = $("ctRun"); if (!btn) return;
+    const fileEl = $("ctFile"), passEl = $("ctPass"), langEl = $("ctLang"),
+          alignEl = $("ctAlign"), statusEl = $("ctStatus");
+    let running = false;
+
+    const setStatus = (msg, kind) => {
+      statusEl.textContent = msg || "";
+      statusEl.style.color = kind === "err" ? "#ff8faa" : kind === "ok" ? "#5fd0a0" : "";
+    };
+
+    // Poll the Worker until Replicate reports the prediction done. Short clips
+    // are usually well under a minute on a GPU; the ceiling is generous.
+    async function poll(id, pass) {
+      const started = performance.now();
+      const MAX_MS = 15 * 60 * 1000;
+      while (true) {
+        if (performance.now() - started > MAX_MS) throw new Error("Timed out waiting for transcription.");
+        await new Promise((r) => setTimeout(r, 3000));
+        const r = await fetch("/api/transcribe?id=" + encodeURIComponent(id), {
+          headers: { "x-transcribe-pass": pass },
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.error || "Status check failed.");
+        if (data.status === "succeeded") return data.output;
+        if (data.status === "failed" || data.status === "canceled") throw new Error(data.error || "Transcription failed.");
+        setStatus("Transcribing on the GPU… (" + (data.status || "working") + ") — this can take a minute", "");
+      }
+    }
+
+    btn.addEventListener("click", async () => {
+      if (running) return;
+      const file = fileEl.files && fileEl.files[0];
+      const pass = (passEl.value || "").trim();
+      if (!file) return setStatus("Choose an audio or video file first.", "err");
+      if (!pass) return setStatus("Enter the access passphrase.", "err");
+
+      running = true; btn.disabled = true;
+      setStatus("Uploading…", "");
+      try {
+        const fd = new FormData();
+        fd.append("file", file, file.name);
+        fd.append("language", langEl.value || "");
+        fd.append("align", alignEl.checked ? "true" : "false");
+        const res = await fetch("/api/transcribe", {
+          method: "POST",
+          headers: { "x-transcribe-pass": pass },
+          body: fd,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 501) throw new Error("Cloud Transcribe isn't set up on this site yet.");
+        if (res.status === 401) throw new Error("Wrong passphrase.");
+        if (!res.ok || !data.id) throw new Error(data.detail || data.error || "Couldn't start transcription.");
+
+        setStatus("Transcribing on the GPU…", "");
+        const output = await poll(data.id, pass);
+        if (!output || !Array.isArray(output.segments)) throw new Error("Transcription returned no text.");
+
+        const base = (file.name.replace(/\.[^.]+$/, "") || "cloud") + ".json";
+        state.baseName = base;
+        loadTranscriptText(base, JSON.stringify(output));
+        try { setAudioFile(file); } catch (e) { /* preview audio is a bonus */ }
+        setStatus("✓ Transcribed — style it in the tabs and export.", "ok");
+      } catch (e) {
+        setStatus("⚠️ " + (e && e.message ? e.message : e), "err");
+      } finally {
+        running = false; btn.disabled = false;
+      }
+    });
+  }
+
   function wire() {
     wireTabs();
     wireCopyBlocks();
+    wireCloudTranscribe();
     const vEl = $("appVersion"); if (vEl) vEl.textContent = "v" + APP_VERSION;
     console.log("WhisperX Caption Studio v" + APP_VERSION);
     buildFontList();
