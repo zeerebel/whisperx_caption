@@ -232,6 +232,15 @@ h1{margin:0}
 .tabpanel .group-body{border-top:0;padding-top:var(--space-3)}
 /* the Guide tab: give it a subtle accent so it reads as help, not a control */
 .tab-guide.is-active{border-color:rgba(110,168,255,.45)}
+/* the Export tab: always filled with the same blue as the primary export
+   button, so it's unmistakable in the tab strip at a glance — this is where
+   your file comes out, it shouldn't require reading every tab label to find. */
+.tab[data-tab="export"]{
+  background:linear-gradient(180deg,#6a97ff,#5b8cff);color:#0a0f1c;border-color:transparent;font-weight:700;
+  box-shadow:var(--e1),inset 0 1px 0 rgba(255,255,255,.3);
+}
+.tab[data-tab="export"]:hover{background:linear-gradient(180deg,#79a2ff,#6690ff);color:#0a0f1c}
+.tab[data-tab="export"].is-active{background:linear-gradient(180deg,#5b8cff,#4778e6);box-shadow:var(--e1),inset 0 -3px 0 #fff}
 
 /* ---------- Guide / instructions ---------- */
 .guide{gap:var(--space-3);color:var(--ink-dim);line-height:1.6}
