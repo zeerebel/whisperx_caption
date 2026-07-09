@@ -137,6 +137,39 @@ whisperx "separated\htdemucs\$name\vocals.wav" --model large-v2 --language en --
             <input id="fileAudio" type="file" accept="audio/*,video/*" />
           </label>
           <p id="srcInfo" class="hint">No transcript loaded.</p>
+
+          <hr class="sep" />
+          <div class="ct">
+            <p class="ct-title">☁ Cloud Transcribe <span class="beta">beta</span></p>
+            <p class="hint">No WhisperX install needed — upload audio or video, we transcribe it on a GPU, and it loads here automatically. Requires the access passphrase from the site owner.</p>
+            <label class="filepick">
+              <span>Audio / video (mp3, wav, m4a, mp4…)</span>
+              <input id="ctFile" type="file" accept="audio/*,video/*" />
+            </label>
+            <div class="grid2">
+              <label>Language
+                <select id="ctLang">
+                  <option value="">Auto-detect</option>
+                  <option value="en">English</option>
+                  <option value="es">Spanish</option>
+                  <option value="fr">French</option>
+                  <option value="de">German</option>
+                  <option value="pt">Portuguese</option>
+                  <option value="it">Italian</option>
+                  <option value="nl">Dutch</option>
+                  <option value="ja">Japanese</option>
+                  <option value="ko">Korean</option>
+                  <option value="zh">Chinese</option>
+                </select>
+              </label>
+              <label>Access passphrase
+                <input id="ctPass" type="password" autocomplete="off" placeholder="from the owner" />
+              </label>
+            </div>
+            <label class="check"><input id="ctAlign" type="checkbox" checked /> Word-level timing (needed for karaoke / word highlight)</label>
+            <button id="ctRun" class="btn primary wide" type="button">☁ Transcribe in the cloud</button>
+            <p id="ctStatus" class="hint" role="status" aria-live="polite"></p>
+          </div>
         </div>
       </section>
 

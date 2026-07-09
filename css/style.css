@@ -326,6 +326,10 @@ input[type=range]::-moz-range-thumb{width:18px;height:18px;border:none;border-ra
 input[type=range]::-moz-range-progress{background:var(--accent);height:4px;border-radius:99px}
 .filepick input[type=file]{font-size:var(--text-sm);padding:7px;cursor:pointer}
 .hint{font-size:var(--text-sm);color:var(--ink-dim);margin:0;line-height:1.6}
+/* Cloud Transcribe block (Source tab) */
+.ct{display:flex;flex-direction:column;gap:var(--space-3)}
+.ct-title{font-family:var(--display);font-weight:700;letter-spacing:.04em;text-transform:uppercase;font-size:var(--text-md);color:var(--ink);margin:0}
+.ct-title .beta{font-family:var(--sans);font-weight:600;font-size:var(--text-xs);color:#5cc8ff;border:1px solid rgba(92,200,255,.4);padding:1px 6px;margin-left:6px;text-transform:none;letter-spacing:0}
 .hidden{display:none}
 .val{font-family:var(--display);letter-spacing:.04em;color:var(--accent);font-variant-numeric:tabular-nums;font-weight:500}
 hr.sep{border:0;border-top:1px solid var(--line);margin:var(--space-1) 0}
