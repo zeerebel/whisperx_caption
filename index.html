@@ -89,6 +89,13 @@ whisperx "separated\htdemucs\song\vocals.wav" --model large-v2 --language en --o
           <p class="hint">Demucs always writes <b>vocals.wav</b> into a folder named after the
              input file: <code>separated\htdemucs\&lt;filename&gt;\vocals.wav</code>. Point WhisperX there.</p>
 
+          <h3>Optional · One-liner (PowerShell 7)</h3>
+          <p>On <b>PowerShell 7</b>, <code>&amp;&amp;</code> runs WhisperX <b>only if</b> Demucs
+             succeeds — one line, still safe (PowerShell 5.1 doesn't support <code>&amp;&amp;</code>):</p>
+          <div class="code"><button class="code-copy btn tiny" type="button">Copy</button><pre>demucs --two-stems=vocals "song.mp3" && whisperx "separated\htdemucs\song\vocals.wav" --model large-v2 --language en --output_format json --compute_type int8</pre></div>
+          <p class="hint">Get PowerShell 7 from the Microsoft Store if you don't have it. Avoid
+             chaining with <code>;</code> — that runs WhisperX even when Demucs fails.</p>
+
           <h3>3 · Any filename (no renaming)</h3>
           <p>Derives the folder automatically. Use straight quotes <code>"</code>, never curly <code>“ ”</code>:</p>
           <div class="code"><button class="code-copy btn tiny" type="button">Copy</button><pre>$in = "my song.mp3"
