@@ -40,6 +40,35 @@ use. That's why it's free.
 - `assets/backdrop.jpg` — page backdrop; **replace this file to change it**.
 - `tools/transcribe_whisperx.py` — the local WhisperX helper (not part of the site).
 
+## Local transcription pipeline (PowerShell) — how the input JSON is made
+This is the exact process a user runs today to produce the WhisperX `.json`
+the app consumes. It's also **the pipeline the premium Cloud Transcribe
+feature would automate server-side** (see `docs/PREMIUM_PLAN.md`).
+
+1. **Isolate the vocals** with Demucs (two-stem split → cleaner transcription
+   of lyrics, no music bleed):
+   ```powershell
+   demucs --two-stems=vocals "buffalo-stance.mp3"
+   ```
+   Output lands at `separated\htdemucs\<song-name>\vocals.wav`.
+
+2. **Transcribe the isolated vocals** with WhisperX → WhisperX JSON:
+   ```powershell
+   whisperx "separated\htdemucs\buffalo-stance\vocals.wav" --model large-v2 --language en --output_format json --compute_type int8
+   ```
+
+One-liner (separate + transcribe in sequence):
+```powershell
+demucs --two-stems=vocals "common-people.mp3"; whisperx "separated\htdemucs\common-people\vocals.wav" --model large-v2 --language en --output_format json --compute_type int8
+```
+
+Notes:
+- `--model large-v2` = accuracy; `--compute_type int8` = lower VRAM/CPU-friendly.
+- `--language en` skips auto-detect (faster, avoids mis-detection on lyrics).
+- The resulting `.json` is what you drop into the app's **Source** tab.
+- The Demucs step is optional for clean speech, but it noticeably improves
+  transcription of **sung lyrics** over a music bed.
+
 ## Gotchas for the next dev
 - **Every control has an `id` referenced by `js/app.js` — preserve ids** when
   editing markup. Sections are `.tabpanel[data-panel]`; `wireTabs()` toggles
