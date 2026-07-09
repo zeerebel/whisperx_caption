@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.10.2";
+  const APP_VERSION = "1.11.0";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -93,6 +93,48 @@
   }
   function exportRes() { const [w, h] = $("optRes").value.split("x").map(Number); return { w, h }; }
   function exportFps() { return +$("optFps").value; }
+
+  // ---------- strip / band export ----------
+  // "Export a horizontal strip only" keeps the full frame width but outputs just
+  // a band of the height. The encode cost is ~frames × width × height, so a 1/5
+  // band encodes ~5× faster and yields a much smaller file — ideal for slapping
+  // a transparent caption band over real footage. Captions still render at their
+  // full-frame size/position (see drawExportFrame), so the band drops on already
+  // aligned.
+  function stripEnabled() { const el = $("optStrip"); return !!(el && el.checked); }
+  // Full reference frame (fw×fh), the band's top (bandY), and the output size
+  // (w×h). Without a strip, the band IS the whole frame.
+  function exportGeom() {
+    const { w: fw, h: fh } = exportRes();
+    if (!stripEnabled()) return { fw, fh, bandY: 0, w: fw, h: fh, strip: false };
+    const pct = Math.min(100, Math.max(1, +$("optStripH").value || 20));
+    const bh = Math.min(fh, Math.max(1, Math.round((fh * pct) / 100)));
+    const pos = ($("optStripPos") && $("optStripPos").value) || "bottom";
+    const bandY = pos === "top" ? 0 : pos === "center" ? Math.round((fh - bh) / 2) : fh - bh;
+    return { fw, fh, bandY, w: fw, h: bh, strip: true };
+  }
+  // Render one export frame. Full frame → straight drawCaption. Strip → render the
+  // whole fw×fh frame but shift it up by the band's top, so only the band's rows
+  // land on the w×h canvas; every caption keeps the exact size and place it has in
+  // the full frame. drawCaption clears its full W×H first, which under this shift
+  // still covers the visible band, so no stale pixels survive between frames.
+  function drawExportFrame(octx, cue, style, t, g, anim) {
+    if (!g.strip) { WXC.render.drawCaption(octx, cue, style, t, g.fw, g.fh, anim); return; }
+    octx.save();
+    octx.translate(0, -g.bandY);
+    WXC.render.drawCaption(octx, cue, style, t, g.fw, g.fh, anim);
+    octx.restore();
+  }
+  function updateStripUI() {
+    const on = stripEnabled();
+    const fields = $("stripFields");
+    if (fields) fields.classList.toggle("hidden", !on);
+    const ro = $("stripReadout");
+    if (!ro) return;
+    if (!on) { ro.textContent = ""; return; }
+    const g = exportGeom();
+    ro.textContent = `Output ${g.w}×${g.h}px — the band spans rows ${g.bandY}–${g.bandY + g.h} of the ${g.fw}×${g.fh} frame; place it there on your video.`;
+  }
 
   // ---------- fonts ----------
   const loadedGFonts = new Set();
@@ -184,8 +226,25 @@
     const idx = cueIndexAt(state.t);           // one scan instead of cueAt + cueIndexAt
     const cue = idx >= 0 ? state.cues[idx] : null;
     WXC.render.drawCaption(pctx, cue, buildRenderStyle(), state.t, canvas.width, canvas.height, readAnim());
+    drawStripGuide();
     $("emptyHint").style.display = state.model ? "none" : "";
     highlightCueRow(idx);
+  }
+  // Dim the preview outside the exported band and outline it, so you can see the
+  // slice you'll get and position captions inside it. Preview-only — never exported.
+  function drawStripGuide() {
+    if (!stripEnabled()) return;
+    const g = exportGeom();
+    const top = Math.round((canvas.height * g.bandY) / g.fh);
+    const bot = Math.round((canvas.height * (g.bandY + g.h)) / g.fh);
+    pctx.save();
+    pctx.fillStyle = "rgba(0,0,0,0.5)";
+    pctx.fillRect(0, 0, canvas.width, top);
+    pctx.fillRect(0, bot, canvas.width, canvas.height - bot);
+    pctx.strokeStyle = "rgba(120,200,255,0.9)";
+    pctx.lineWidth = Math.max(1, canvas.height / 400);
+    pctx.strokeRect(0, top, canvas.width, bot - top);
+    pctx.restore();
   }
 
   // ---------- background layer ----------
@@ -578,7 +637,8 @@
 
   async function exportPngSequence() {
     if (!state.cues.length || state.exporting) return;
-    const { w, h } = exportRes();
+    const g = exportGeom();
+    const { w, h } = g;
     const fps = exportFps();
     const frameCount = Math.max(1, Math.round(state.duration * fps));
     const zipName = `${baseName()}_${w}x${h}_${fps}fps_png.zip`;
@@ -609,7 +669,7 @@
     const anim = readAnim();
     setExportBusy(true);
     pause();
-    await ensureFontsForExport(style, h);
+    await ensureFontsForExport(style, g.fh);
     const off = document.createElement("canvas");
     off.width = w; off.height = h;
     const octx = off.getContext("2d", { alpha: true });
@@ -619,7 +679,7 @@
       for (let i = 0; i < frameCount; i++) {
         checkCancel();
         const t = i / fps;
-        WXC.render.drawCaption(octx, cueAt(t), style, t, w, h, anim);
+        drawExportFrame(octx, cueAt(t), style, t, g, anim);
         const blob = await new Promise((res) => off.toBlob(res, "image/png"));
         if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
         const name = `cap_${String(i).padStart(5, "0")}.png`;
@@ -630,9 +690,13 @@
           await new Promise((r) => setTimeout(r, 0));
         }
       }
+      const stripNote = g.strip
+        ? `strip: this is a ${g.w}x${g.h} band of a ${g.fw}x${g.fh} frame — ` +
+          `place it at y=${g.bandY} (rows ${g.bandY}-${g.bandY + g.h}) over your video to line the captions up.\n`
+        : "";
       const readme =
         `WhisperX Caption Studio — transparent caption frames\n` +
-        `fps: ${fps}\nresolution: ${w}x${h}\nframes: ${frameCount}\n\n` +
+        `fps: ${fps}\nresolution: ${w}x${h}\nframes: ${frameCount}\n` + stripNote + `\n` +
         `Import as an image sequence and set the frame rate to ${fps}.\n` +
         `Premiere: File > Import > select cap_00000.png > tick "Image Sequence".\n` +
         `After Effects / Resolve / Final Cut: import the folder as a PNG sequence.\n` +
@@ -662,7 +726,8 @@
 
   async function exportPngFrame() {
     if (!state.cues.length || state.exporting) return;
-    const { w, h } = exportRes();
+    const g = exportGeom();
+    const { w, h } = g;
     let t = state.t;
     let cue = cueAt(t);
     if (!cue) { cue = state.cues[0]; t = (cue.start + cue.end) / 2; }
@@ -671,11 +736,11 @@
     const handle = await pickSaveHandle(name, { "image/png": [".png"] });
     if (handle === "cancel") return;
     const style = buildRenderStyle();
-    await ensureFontsForExport(style, h);
+    await ensureFontsForExport(style, g.fh);
     const off = document.createElement("canvas");
     off.width = w; off.height = h;
     const octx = off.getContext("2d", { alpha: true });
-    WXC.render.drawCaption(octx, cue, style, t, w, h, readAnim());
+    drawExportFrame(octx, cue, style, t, g, readAnim());
     off.toBlob((b) => {
       if (!b) return toast("⚠️ PNG export failed (resolution too large?)");
       saveOrDownload(handle, b, name).then(() => toast("✓ Transparent PNG exported"));
@@ -687,7 +752,8 @@
   async function exportWebm() {
     if (!state.cues.length || state.exporting) return;
     if (typeof MediaRecorder === "undefined") return toast("⚠️ MediaRecorder not supported here");
-    const { w, h } = exportRes();
+    const g = exportGeom();
+    const { w, h } = g;
     const fps = exportFps();
     const bg = bgColor() || "#000000";
     if (!bgColor())
@@ -701,7 +767,7 @@
     pause();
     let mr = null, stream = null, rec = null, cap = null;
     try {
-      await ensureFontsForExport(style, h);
+      await ensureFontsForExport(style, g.fh);
       rec = document.createElement("canvas"); rec.width = w; rec.height = h;
       const rctx = rec.getContext("2d", { alpha: false });
       cap = document.createElement("canvas"); cap.width = w; cap.height = h;
@@ -721,7 +787,7 @@
             if (exportCancelled) { resolve(); return; }
             const t = (performance.now() - startT) / 1000;
             rctx.fillStyle = bg; rctx.fillRect(0, 0, w, h);
-            WXC.render.drawCaption(cctx, cueAt(t), style, t, w, h, anim);
+            drawExportFrame(cctx, cueAt(t), style, t, g, anim);
             rctx.drawImage(cap, 0, 0);
             $("exportProgress").textContent = `Recording ${t.toFixed(1)}s / ${state.duration.toFixed(1)}s…`;
             if (t >= state.duration) { resolve(); return; }
@@ -844,7 +910,8 @@
 
   async function exportMov() {
     if (!state.cues.length || state.exporting) return;
-    const { w, h } = exportRes();
+    const g = exportGeom();
+    const { w, h } = g;
     const fps = exportFps();
     const frameCount = Math.max(1, Math.round(state.duration * fps));
     const codecSel = ($("optMovCodec") && $("optMovCodec").value) || "qtrle";
@@ -879,12 +946,12 @@
     off.width = w; off.height = h;
     let terminated = false;
     try {
-      await ensureFontsForExport(style, h);
+      await ensureFontsForExport(style, g.fh);
       const octx = off.getContext("2d", { alpha: true });
       for (let i = 0; i < frameCount; i++) {
         checkCancel();
         const t = i / fps;
-        WXC.render.drawCaption(octx, cueAt(t), style, t, w, h, anim);
+        drawExportFrame(octx, cueAt(t), style, t, g, anim);
         const blob = await new Promise((res) => off.toBlob(res, "image/png"));
         if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
         const name = `cap_${String(i).padStart(5, "0")}.png`;
@@ -958,7 +1025,7 @@
   function copyFfmpeg() {
     const name = baseName();
     const fps = exportFps();
-    const { w, h } = exportRes();
+    const { w, h } = exportGeom(); // match the actual exported band size in filenames
     // the color the chroma WebM was rendered on (green unless you changed it),
     // as ffmpeg's 0xRRGGBB form, so colorkey removes the right color.
     const chromaSel = $("optChroma").value;
@@ -988,6 +1055,7 @@
     "optVAlign", "optHAlign", "optMarginX", "optMarginY", "optMaxWidth",
     "optMaxWords", "optMaxChars", "optMaxDur", "optMaxGap", "optPunct",
     "optExportKaraoke", "optBgMode", "optChroma", "optChromaCustom", "optRes", "optFps", "optMovCodec",
+    "optStrip", "optStripH", "optStripPos",
   ];
   // Snapshot every style control into a plain object (the shape a preset stores).
   function captureStyle() {
@@ -1224,12 +1292,14 @@
     loadStyle();
     if ($("optBgMode").value === "image") $("optBgMode").value = "transparent"; // image blobs can't be persisted
     updateBackground();
+    updateStripUI();
 
     document.querySelectorAll(".panel input, .panel select").forEach((el) => {
       el.addEventListener("input", () => {
         if (el.id === "optFont" && el.value === "__upload") return; // sentinel handled by the change listener
         if (TIMING_IDS.includes(el.id)) rebuildCues();
         if (el.id === "optRes") resizePreview();
+        if (el.id === "optRes" || el.id.startsWith("optStrip")) updateStripUI();
         if (el.id === "optAnimSpeed") $("animSpeedVal").textContent = (+el.value).toFixed(2).replace(/0$/, "") + "×";
         if (el.id === "optAnimIntensity") $("animIntVal").textContent = (+el.value).toFixed(1);
         drawPreview();

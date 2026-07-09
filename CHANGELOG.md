@@ -4,6 +4,21 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.11.0 — Horizontal strip export (faster overlays)
+- New **"Export a horizontal strip only"** option in the Export tab. Keeps the
+  full frame **width** but outputs just a band of the height (pick **15–50%**
+  and **Bottom / Center / Top**), so the encode does far fewer pixels — a 1/5
+  band is roughly **5× faster** and a fraction of the file size. Built for the
+  common case of slapping a transparent caption band over real footage.
+- The band is a **pixel-exact crop of the full frame**: captions keep the exact
+  size and position they have at full resolution, so the strip drops onto your
+  video already aligned — no rescaling, no guesswork.
+- Applies to every transparent export path (PNG sequence, single PNG, `.mov`,
+  chroma `.webm`). The PNG-sequence README and the on-screen readout tell you
+  which rows of the frame the band covers so you can place it precisely.
+- Live **preview guide**: the area outside the band is dimmed and outlined so
+  you can see the slice you'll get and keep captions inside it.
+
 ## v1.9.4 — Real backdrop art
 - Replaced the placeholder backdrop with the neon portrait artwork supplied
   by the author (assets/backdrop.jpg). Same layer system: gradient veil at
