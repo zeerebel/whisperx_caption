@@ -230,6 +230,26 @@ h1{margin:0}
   font-family:var(--display);font-weight:500;font-size:var(--text-lg);text-transform:uppercase;letter-spacing:.07em;color:var(--ink);
 }
 .tabpanel .group-body{border-top:0;padding-top:var(--space-3)}
+/* the Guide tab: give it a subtle accent so it reads as help, not a control */
+.tab-guide.is-active{border-color:rgba(110,168,255,.45)}
+
+/* ---------- Guide / instructions ---------- */
+.guide{gap:var(--space-3);color:var(--ink-dim);line-height:1.6}
+.guide p{margin:0}
+.guide b{color:var(--ink)}
+.guide h3{
+  margin:var(--space-3) 0 0;font-family:var(--display);font-weight:500;font-size:var(--text-md);
+  text-transform:uppercase;letter-spacing:.06em;color:var(--ink);
+}
+.guide code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.92em;background:var(--panel-2);padding:1px 5px;color:#cdd4e0;border:1px solid var(--line)}
+.code{position:relative;margin:var(--space-1) 0}
+.code pre{
+  margin:0;background:#080a0e;border:1px solid var(--line-strong);
+  padding:12px 14px;padding-right:64px;overflow-x:auto;-webkit-overflow-scrolling:touch;
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.65;
+  color:#dbe0e8;white-space:pre;tab-size:2;
+}
+.code-copy{position:absolute;top:6px;right:6px;padding:3px 9px;min-height:0;font-size:11px;z-index:1}
 @media (prefers-reduced-motion:reduce){ .tabpanel.is-active{animation:none} }
 
 /* ---------- (legacy accordion styles, retained harmlessly) ---------- */
