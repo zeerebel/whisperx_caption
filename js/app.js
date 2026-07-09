@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.9.5";
+  const APP_VERSION = "1.10.0";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -1200,8 +1200,23 @@
     if (t && !t.classList.contains("is-active")) t.click();
   }
 
+  // Copy buttons in the Guide tab: copy the sibling <pre> command block.
+  function wireCopyBlocks() {
+    document.querySelectorAll(".code-copy").forEach((b) => {
+      b.addEventListener("click", () => {
+        const pre = b.parentElement.querySelector("pre");
+        if (!pre) return;
+        navigator.clipboard.writeText(pre.innerText).then(
+          () => { const o = b.textContent; b.textContent = "Copied ✓"; setTimeout(() => (b.textContent = o), 1400); },
+          () => toast("⚠️ Couldn't copy — select the text manually")
+        );
+      });
+    });
+  }
+
   function wire() {
     wireTabs();
+    wireCopyBlocks();
     const vEl = $("appVersion"); if (vEl) vEl.textContent = "v" + APP_VERSION;
     console.log("WhisperX Caption Studio v" + APP_VERSION);
     buildFontList();

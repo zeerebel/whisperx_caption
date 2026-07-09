@@ -57,6 +57,7 @@
     <!-- ============ CONTROL PANEL ============ -->
     <aside class="panel">
       <nav class="tabs" role="tablist" aria-label="Controls">
+        <button class="tab tab-guide" type="button" data-tab="guide" role="tab">Guide</button>
         <button class="tab" type="button" data-tab="source" role="tab">Source</button>
         <button class="tab" type="button" data-tab="grouping" role="tab">Grouping</button>
         <button class="tab" type="button" data-tab="type" role="tab">Type</button>
@@ -68,6 +69,54 @@
         <button class="tab" type="button" data-tab="presets" role="tab">Presets</button>
       </nav>
       <div class="tabpanels">
+
+      <section class="tabpanel" id="tab-guide" data-panel="guide" role="tabpanel">
+        <h2 class="panel-title">Make a transcript · PowerShell</h2>
+        <div class="group-body guide">
+          <p>This app styles a <b>WhisperX transcript</b>. Here's how to make one on
+             Windows (PowerShell) — separate the vocals with <b>Demucs</b>, then
+             transcribe with <b>WhisperX</b>. Load the resulting <b>.json</b> in the
+             <b>Source</b> tab.</p>
+
+          <h3>1 · One-time install</h3>
+          <p>Needs <b>Python 3.10+</b> and <b>ffmpeg</b>. Then:</p>
+          <div class="code"><button class="code-copy btn tiny" type="button">Copy</button><pre>pip install demucs whisperx</pre></div>
+
+          <h3>2 · Transcribe one file</h3>
+          <p>Run these <b>one at a time</b> (let Demucs finish first):</p>
+          <div class="code"><button class="code-copy btn tiny" type="button">Copy</button><pre>demucs --two-stems=vocals "song.mp3"
+whisperx "separated\htdemucs\song\vocals.wav" --model large-v2 --language en --output_format json --compute_type int8</pre></div>
+          <p class="hint">Demucs always writes <b>vocals.wav</b> into a folder named after the
+             input file: <code>separated\htdemucs\&lt;filename&gt;\vocals.wav</code>. Point WhisperX there.</p>
+
+          <h3>3 · Any filename (no renaming)</h3>
+          <p>Derives the folder automatically. Use straight quotes <code>"</code>, never curly <code>“ ”</code>:</p>
+          <div class="code"><button class="code-copy btn tiny" type="button">Copy</button><pre>$in = "my song.mp3"
+demucs --two-stems=vocals $in
+$name = [System.IO.Path]::GetFileNameWithoutExtension($in)
+whisperx "separated\htdemucs\$name\vocals.wav" --model large-v2 --language en --output_format json --compute_type int8</pre></div>
+
+          <h3>4 · Batch every file in a folder</h3>
+          <p>Separates + transcribes every <b>.mp3</b> in the current folder (change
+             <code>*.mp3</code> to <code>*.wav</code>, <code>*.m4a</code>, etc.):</p>
+          <div class="code"><button class="code-copy btn tiny" type="button">Copy</button><pre>Get-ChildItem *.mp3 | ForEach-Object {
+    $name = $_.BaseName
+    demucs --two-stems=vocals $_.Name
+    whisperx "separated\htdemucs\$name\vocals.wav" --model large-v2 --language en --output_format json --compute_type int8
+}</pre></div>
+
+          <h3>Tips</h3>
+          <p class="hint">
+            • Keep filenames simple — <b>no spaces or quote characters</b> (a stray curly quote
+              breaks parsing).<br>
+            • <code>--model large-v2</code> = accuracy · <code>--compute_type int8</code> = lighter on VRAM/CPU ·
+              <code>--language en</code> skips auto-detect.<br>
+            • The Demucs step is optional for clean speech, but it noticeably improves
+              transcription of <b>sung lyrics</b> over music.<br>
+            • Drop the finished <b>.json</b> into the <b>Source</b> tab and start styling.
+          </p>
+        </div>
+      </section>
 
       <section class="tabpanel" id="tab-source" data-panel="source" role="tabpanel">
         <h2 class="panel-title">1 · Source</h2>
