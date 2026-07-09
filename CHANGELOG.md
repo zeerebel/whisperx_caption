@@ -4,6 +4,16 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.10.3 — Hero styling on the one-click .mov export
+- The **⬇ Transparent .mov — one click** button (`#dlMov`) is now the visual
+  hero of the Export tab: brighter electric-cyan gradient, taller, with a soft
+  accent glow that gently breathes to draw the eye. It's the flagship action
+  (true-alpha overlay in one click), so it should be the obvious thing to press.
+- Stays in the cool accent family so it doesn't fight the palette; the glow +
+  size set it apart from the flat-blue PNG-sequence button.
+- Glow and breathing are disabled while the button is (dimmed and inert until a
+  transcript loads) and honor `prefers-reduced-motion`.
+
 ## v1.9.4 — Real backdrop art
 - Replaced the placeholder backdrop with the neon portrait artwork supplied
   by the author (assets/backdrop.jpg). Same layer system: gradient veil at

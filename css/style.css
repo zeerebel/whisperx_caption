@@ -350,6 +350,33 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:var(--space-1) 0}
   box-shadow:var(--e2),inset 0 1px 0 rgba(255,255,255,.35);
 }
 .btn.primary:hover:not(:disabled){background:linear-gradient(180deg,#8dbaff,#6c98ff)}
+/* Hero export action — the one-click transparent .mov is the flagship
+   feature, so it gets the loudest treatment: a brighter electric-cyan
+   gradient, extra height, and a soft accent glow that gently breathes to
+   pull the eye. Kept in the cool accent family so it doesn't fight the
+   palette; the glow + size make it unmistakable next to the flat-blue PNG
+   button. Like every export it stays dimmed and inert — no glow, no
+   breathing — until a transcript is loaded (setExportEnabled). */
+.btn.hero{
+  background:linear-gradient(180deg,#5cc8ff,#2f8bff);color:#05121f;border-color:transparent;
+  font-weight:800;min-height:54px;font-size:var(--text-md);letter-spacing:.005em;
+  box-shadow:var(--e2),inset 0 1px 0 rgba(255,255,255,.45);
+}
+.btn.hero:not(:disabled){
+  box-shadow:var(--e2),0 0 0 1px rgba(92,200,255,.55),0 8px 30px rgba(64,150,255,.35),inset 0 1px 0 rgba(255,255,255,.45);
+  animation:heroGlow 2.8s var(--ease) infinite;
+}
+.btn.hero:hover:not(:disabled){
+  background:linear-gradient(180deg,#74d4ff,#3f97ff);transform:translateY(-1px);
+  box-shadow:var(--e3),0 0 0 1px rgba(116,212,255,.7),0 12px 40px rgba(64,150,255,.5),inset 0 1px 0 rgba(255,255,255,.55);
+  animation:none;
+}
+.btn.hero:active:not(:disabled){transform:translateY(0)}
+@keyframes heroGlow{
+  0%,100%{box-shadow:var(--e2),0 0 0 1px rgba(92,200,255,.45),0 6px 22px rgba(64,150,255,.28),inset 0 1px 0 rgba(255,255,255,.45)}
+  50%{box-shadow:var(--e2),0 0 0 1px rgba(92,200,255,.78),0 10px 36px rgba(64,150,255,.55),inset 0 1px 0 rgba(255,255,255,.45)}
+}
+@media (prefers-reduced-motion: reduce){ .btn.hero:not(:disabled){animation:none} }
 .btn.ghost{background:transparent;border-color:var(--line-strong)}
 .btn.ghost:hover:not(:disabled){background:var(--panel-2)}
 /* donate: flat + square like everything else; warm accent kept quiet */
