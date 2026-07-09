@@ -69,6 +69,30 @@ Notes:
 - The Demucs step is optional for clean speech, but it noticeably improves
   transcription of **sung lyrics** over a music bed.
 
+### Troubleshooting / filename gotchas
+- **Demucs always outputs `vocals.wav`** (from `--two-stems=vocals`) inside a
+  folder named after the **input file**, i.e.
+  `separated\htdemucs\<filename-without-extension>\vocals.wav`. Point WhisperX
+  at *that* — not at the song's name, and not at a leftover folder from an
+  earlier run.
+- **Keep filenames simple** — letters/numbers/hyphens, **no spaces and no
+  quote characters**. A stray "smart"/curly quote (`“` `”`) or space breaks
+  PowerShell's quote parsing; the classic symptom is the second command's
+  flags leaking into the first, e.g.
+  `demucs.separate: error: unrecognized arguments: --model large-v2 …`
+  (that means the `;` got swallowed and WhisperX's args were handed to Demucs).
+  Fix: rename the file to something like `song.mp3` and rerun.
+- **Run the two commands separately** (or on two lines). `;` runs the second
+  even if the first failed, and WhisperX needs the `vocals.wav` Demucs makes.
+- **Robust version for any filename** (derives the folder, avoids retyping the
+  path — just use straight quotes `"` in `$in`, never curly):
+  ```powershell
+  $in = "my song.mp3"
+  demucs --two-stems=vocals $in
+  $name = [System.IO.Path]::GetFileNameWithoutExtension($in)
+  whisperx "separated\htdemucs\$name\vocals.wav" --model large-v2 --language en --output_format json --compute_type int8
+  ```
+
 ## Gotchas for the next dev
 - **Every control has an `id` referenced by `js/app.js` — preserve ids** when
   editing markup. Sections are `.tabpanel[data-panel]`; `wireTabs()` toggles
