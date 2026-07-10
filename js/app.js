@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.10.2";
+  const APP_VERSION = "1.11.0";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -576,6 +576,53 @@
     } catch (e) {}
   }
 
+  // Captions only ever fill a horizontal band (a lower-third), so exporting the
+  // WHOLE frame every tick wastes most of the per-frame cost (clear + PNG encode
+  // scale with pixel count). This finds the smallest vertical band [top, top+height]
+  // that contains EVERY cue across the clip — using the same layout the renderer
+  // uses — padded for outline/shadow/box and animation motion, then anchored to
+  // the caption's own alignment so placement stays trivial (a bottom-aligned strip
+  // keeps the frame's bottom edge). Returns null when a band gives no real win
+  // (e.g. middle-aligned text that spans most of the frame) → fall back to full.
+  function computeCaptionBand(style, anim, w, h) {
+    if (!state.cues.length) return null;
+    const meas = document.createElement("canvas").getContext("2d");
+    const scale = h / 1080;
+    let minY = Infinity, maxY = -Infinity;
+    for (const cue of state.cues) {
+      const L = WXC.render.layout(meas, cue, style, w, h, scale);
+      if (!L.lines.length) continue;
+      minY = Math.min(minY, L.blockTop);
+      maxY = Math.max(maxY, L.blockTop + L.blockHeight);
+    }
+    if (!isFinite(minY)) return null;
+    const fontPx = style.size * scale;
+    const k = anim && anim.intensity != null ? anim.intensity : 1;
+    const blockH = maxY - minY;
+    // Headroom: box padding + outline + shadow, plus the largest vertical travel
+    // any animation can add (drop-in ≈ 96·scale up, slide ≈ fontPx·1.1, rise/wave
+    // smaller) and the extra half-height a zoom/pop scale-up needs around center.
+    const pad =
+      style.boxPad * scale +
+      style.outline * scale * 2 +
+      style.shadow * scale * 2 +
+      Math.max(fontPx * 1.3, 120 * scale) * Math.max(k, 1) +
+      blockH * 0.4 +
+      8 * scale;
+    let top = Math.floor(minY - pad);
+    let bot = Math.ceil(maxY + pad);
+    // Anchor to the caption alignment so the strip lines up with no fiddling.
+    if (style.vAlign === "bottom") bot = h;
+    else if (style.vAlign === "top") top = 0;
+    top = Math.max(0, top);
+    bot = Math.min(h, bot);
+    let height = bot - top;
+    if (height >= h - 2) return null;          // band ≈ whole frame → no benefit
+    if (height % 2) { if (bot < h) bot++; else if (top > 0) top--; height = bot - top; } // even dims for codecs
+    if (height < 2) return null;
+    return { top, height, w, h };
+  }
+
   async function exportPngSequence() {
     if (!state.cues.length || state.exporting) return;
     const { w, h } = exportRes();
@@ -610,30 +657,57 @@
     setExportBusy(true);
     pause();
     await ensureFontsForExport(style, h);
+    const band = ($("optCropBand") && $("optCropBand").checked) ? computeCaptionBand(style, anim, w, h) : null;
+    const canvasH = band ? band.height : h;
+    const yOff = band ? band.top : 0;
     const off = document.createElement("canvas");
-    off.width = w; off.height = h;
+    off.width = w; off.height = canvasH;
     const octx = off.getContext("2d", { alpha: true });
+    // Sizing the canvas resets its transform; shift the origin up by the band's
+    // top so drawCaption keeps using the FULL frame geometry but only the strip
+    // is rasterised. drawCaption's own save/restore leave this base transform intact.
+    octx.setTransform(1, 0, 0, 1, 0, -yOff);
     const frames = [];
+    let emptyBytes = null;   // encode a blank (no-caption) frame once, reuse it for every silent gap
     const zw = writable ? WXC.zip.createZipStream((bytes) => writable.write(bytes)) : null;
     try {
       for (let i = 0; i < frameCount; i++) {
         checkCancel();
         const t = i / fps;
-        WXC.render.drawCaption(octx, cueAt(t), style, t, w, h, anim);
-        const blob = await new Promise((res) => off.toBlob(res, "image/png"));
-        if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
+        const cue = cueAt(t);
         const name = `cap_${String(i).padStart(5, "0")}.png`;
-        if (zw) await zw.add(name, new Uint8Array(await blob.arrayBuffer()));
-        else frames.push({ name, blob });
+        let bytes;
+        if (!cue && emptyBytes) {
+          bytes = emptyBytes;                     // identical transparent frame → no re-encode
+        } else {
+          WXC.render.drawCaption(octx, cue, style, t, w, h, anim);
+          const blob = await new Promise((res) => off.toBlob(res, "image/png"));
+          if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
+          bytes = new Uint8Array(await blob.arrayBuffer());
+          if (!cue) emptyBytes = bytes;
+        }
+        if (zw) await zw.add(name, bytes);
+        else frames.push({ name, blob: new Blob([bytes], { type: "image/png" }) });
         if (i % 4 === 0) {
           $("exportProgress").textContent = `Rendering frame ${i + 1} / ${frameCount}…`;
           await new Promise((r) => setTimeout(r, 0));
         }
       }
+      const placement = band
+        ? `\nNOTE: these frames are a CROPPED caption strip — ${w}x${canvasH}px out of a ${w}x${h}\n` +
+          `frame (rendered smaller so it exports fast and stays small).\n` +
+          `Place the sequence in a ${w}x${h} timeline at:  X = 0,  Y = ${band.top}px from the top` +
+          (band.top + canvasH >= h
+            ? `\n(its bottom edge is the frame's bottom, so you can just bottom-align it).\n`
+            : `.\n`)
+        : ``;
       const readme =
         `WhisperX Caption Studio — transparent caption frames\n` +
-        `fps: ${fps}\nresolution: ${w}x${h}\nframes: ${frameCount}\n\n` +
-        `Import as an image sequence and set the frame rate to ${fps}.\n` +
+        `fps: ${fps}\nframe size: ${w}x${canvasH}\n` +
+        (band ? `full frame: ${w}x${h}\n` : ``) +
+        `frames: ${frameCount}\n` +
+        placement +
+        `\nImport as an image sequence and set the frame rate to ${fps}.\n` +
         `Premiere: File > Import > select cap_00000.png > tick "Image Sequence".\n` +
         `After Effects / Resolve / Final Cut: import the folder as a PNG sequence.\n` +
         `The alpha channel is preserved — drop it straight over your footage.\n`;
@@ -876,19 +950,32 @@
     }
     const names = [];
     const off = document.createElement("canvas");
-    off.width = w; off.height = h;
     let terminated = false;
     try {
       await ensureFontsForExport(style, h);
+      const band = ($("optCropBand") && $("optCropBand").checked) ? computeCaptionBand(style, anim, w, h) : null;
+      const canvasH = band ? band.height : h;
+      const yOff = band ? band.top : 0;
+      off.width = w; off.height = canvasH;
       const octx = off.getContext("2d", { alpha: true });
+      octx.setTransform(1, 0, 0, 1, 0, -yOff); // rasterise only the strip (see PNG-sequence export)
+      let emptyBytes = null;                    // reuse one blank frame for every silent gap
       for (let i = 0; i < frameCount; i++) {
         checkCancel();
         const t = i / fps;
-        WXC.render.drawCaption(octx, cueAt(t), style, t, w, h, anim);
-        const blob = await new Promise((res) => off.toBlob(res, "image/png"));
-        if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
+        const cue = cueAt(t);
         const name = `cap_${String(i).padStart(5, "0")}.png`;
-        await ff.writeFile(name, new Uint8Array(await blob.arrayBuffer()));
+        let bytes;
+        if (!cue && emptyBytes) {
+          bytes = emptyBytes;
+        } else {
+          WXC.render.drawCaption(octx, cue, style, t, w, h, anim);
+          const blob = await new Promise((res) => off.toBlob(res, "image/png"));
+          if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
+          bytes = new Uint8Array(await blob.arrayBuffer());
+          if (!cue) emptyBytes = bytes;
+        }
+        await ff.writeFile(name, bytes);
         names.push(name);
         if (i % 4 === 0) {
           $("exportProgress").textContent = `Rendering frame ${i + 1} / ${frameCount}…`;
@@ -932,7 +1019,11 @@
           : "the encoder produced no output. Lower the resolution/FPS or shorten the clip — or use the PNG sequence + “Copy ffmpeg command”.");
       }
       await saveOrDownload(saveHandle, new Blob([data], { type: "video/quicktime" }), movName);
-      $("exportProgress").textContent = `✓ Transparent .mov exported (${w}×${h}, ${fps}fps, ${codec.label})`;
+      const placeMsg = band
+        ? ` — ${w}×${canvasH} strip; place at Y=${band.top} in a ${w}×${h} frame` +
+          (band.top + canvasH >= h ? " (bottom-aligned)" : "")
+        : "";
+      $("exportProgress").textContent = `✓ Transparent .mov exported (${w}×${canvasH}, ${fps}fps, ${codec.label})${placeMsg}`;
       toast("✓ Transparent .mov exported");
     } catch (e) {
       if (e === CANCEL) reportExportError(e, "");
@@ -988,6 +1079,7 @@
     "optVAlign", "optHAlign", "optMarginX", "optMarginY", "optMaxWidth",
     "optMaxWords", "optMaxChars", "optMaxDur", "optMaxGap", "optPunct",
     "optExportKaraoke", "optBgMode", "optChroma", "optChromaCustom", "optRes", "optFps", "optMovCodec",
+    "optCropBand",
   ];
   // Snapshot every style control into a plain object (the shape a preset stores).
   function captureStyle() {

@@ -273,6 +273,8 @@ whisperx "separated\htdemucs\$name\vocals.wav" --model large-v2 --language en --
               <select id="optFps"><option>24</option><option selected>30</option><option>60</option></select>
             </label>
           </div>
+          <label class="check"><input id="optCropBand" type="checkbox" checked /> Crop to caption band — export just the strip the captions sit in (much faster + smaller)</label>
+          <p class="hint">The overlay becomes a short strip instead of the full frame, so it renders far quicker and the file is smaller — ideal for long clips. It's aligned to your caption position (bottom-aligned captions keep the same bottom edge, so you drop it in and bottom-align exactly like before); the README in the .zip gives the exact placement. Untick for a full-frame overlay you drop at 0,0.</p>
           <button id="dlPngSeq" class="btn primary wide" type="button" disabled>⬇ Transparent PNG sequence (.zip)</button>
           <div class="export-row">
             <button id="dlPngFrame" class="btn" type="button" disabled>Single frame .png</button>
