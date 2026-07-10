@@ -4,6 +4,29 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.11.0 — Caption-band export (much faster on long clips)
+- **Crop to caption band** (Export tab, on by default): the transparent PNG
+  sequence and one-click `.mov` now render only the horizontal **strip** the
+  captions actually occupy instead of the whole frame. Because the per-frame
+  cost (canvas clear + PNG encode) scales with pixel count, a lower-third strip
+  is typically **~3–4× faster to export and produces a smaller file** — the win
+  is largest on tall 9:16 clips and long transcripts (a 23-minute song was the
+  motivating case). The band is computed from the same layout the renderer uses,
+  padded for outline/shadow/box and animation motion, and **anchored to the
+  caption's vertical alignment** so placement stays trivial: a bottom-aligned
+  strip keeps the frame's bottom edge (drop it in and bottom-align exactly like
+  before). The `.zip` README (and the `.mov` status line) state the exact
+  `X=0, Y=…` placement and the full frame size. Untick the box for the classic
+  full-frame overlay you drop at `0,0`.
+- **Silent-gap frame reuse:** a blank (no-caption) frame is PNG-encoded once and
+  its bytes reused for every gap frame, so instrumental/silent stretches cost
+  almost nothing to export. Output is still a normal gap-free numbered sequence.
+
+## v1.10.0–1.10.2 — In-app Guide + Export tab polish
+- Added an in-app **Guide** tab documenting the local Demucs + WhisperX
+  PowerShell pipeline (with a safe PowerShell 7 one-liner), and made the
+  **Export** tab visually distinct so it's easy to find.
+
 ## v1.9.4 — Real backdrop art
 - Replaced the placeholder backdrop with the neon portrait artwork supplied
   by the author (assets/backdrop.jpg). Same layer system: gradient veil at

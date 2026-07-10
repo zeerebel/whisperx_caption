@@ -19,11 +19,38 @@ use. That's why it's free.
   confirm which build is live.
 
 ## Current version state
-- **Live on main: v1.9.3.**
-- **PR #16 is OPEN** on branch `claude/code-handoff-issues-q6we0f` and contains
-  **v1.9.4** (real neon backdrop art) + **v1.9.5** (mobile drop-hint fix).
-  → **Merge PR #16** to take the live site to v1.9.5.
+- **Live on main: v1.10.2** (v1.9.4/1.9.5 backdrop + mobile fixes, and the
+  v1.10.x in-app Guide tab / Export-tab styling all merged).
+- **In progress: v1.11.0** on branch `claude/whisperx-json-handoff-2bbumm` —
+  the **caption-band ("strip") export** that makes long-clip exports far faster
+  (see "Performance: caption-band export" below). Merge that PR to ship it.
 - Full history in `CHANGELOG.md`.
+
+## Performance: caption-band export (v1.11.0) — why long exports were slow
+The motivating bug: a **23-minute** transcript exported for **3 hours and was
+only ~1/5 done**. Cause: `exportPngSequence`/`exportMov` in `js/app.js` render
+**and PNG-encode the entire frame** (`off.toBlob(…, "image/png")`) for **every
+frame**, e.g. 23 min × 30 fps = ~41,400 full-resolution PNG encodes; at 4K each
+encode is the dominant, pixel-bound cost. Fix (both share the pattern):
+- **`computeCaptionBand(style, anim, w, h)`** measures, via the shared
+  `WXC.render.layout`, the smallest vertical band that contains every cue across
+  the clip, pads it (outline/shadow/box + animation travel), and **anchors it to
+  `style.vAlign`** (bottom→strip bottom = frame bottom; top→strip top = frame
+  top; middle→centered). Returns `{top,height,w,h}`, or `null` when a band gives
+  no real win (falls back to full frame).
+- The offscreen canvas is sized `w × band.height`; before the frame loop we
+  `octx.setTransform(1,0,0,1,0,-band.top)` so `drawCaption` keeps using the FULL
+  frame geometry but only the strip is rasterised (its own save/restore leave
+  that base transform intact). Fewer pixels → proportionally faster encode +
+  smaller output.
+- **Empty-frame reuse:** the first no-cue frame's PNG bytes are cached and reused
+  for every silent-gap frame (identical transparent output), so gaps cost ~0.
+- Placement is written into the `.zip` README (`X=0, Y=<top>px`, plus the
+  bottom-align hint) and the `.mov` success status line. Toggle: `#optCropBand`
+  checkbox in the Export tab, **default ON**, persisted via `STYLE_KEYS`.
+- Verified end-to-end with headless Playwright (drives the real UI, exports the
+  sample, asserts exported PNG dimensions are the band with crop on and the full
+  frame with crop off). Script lived in the scratchpad (not committed).
 
 ## Repo layout
 - `index.html` — structure (header, stage/preview, tabbed control panel).
@@ -112,9 +139,13 @@ Notes:
   1280, and assert exports/edits. Re-create as needed.
 
 ## Open threads
-1. **Merge PR #16** (v1.9.4 + v1.9.5).
-2. The user's earlier message cut off at **"and also…"** — never clarified;
-   worth asking.
+1. **Merge the v1.11.0 caption-band PR** (branch
+   `claude/whisperx-json-handoff-2bbumm`) to ship the faster export.
+2. **Further export speedups if still needed:** the band + empty-frame reuse are
+   the first pass. Next levers (not done): reuse bytes for *static* caption holds
+   too (safe only when no animation/karaoke is moving that frame), a Web Worker /
+   OffscreenCanvas encode so the tab stays responsive, and letting the user trim
+   the export time range.
 3. **Premium Cloud Transcribe** — full plan in `docs/PREMIUM_PLAN.md`. User has
    Supabase + Stripe already; recommended GPU = Replicate; API glue = a
    Cloudflare Worker; validate with a waitlist button before building billing.

@@ -99,6 +99,14 @@ The `.zip` contains gap-free numbered frames (`cap_00000.png …`) plus a
 `README.txt` with the fps and resolution (a PNG sequence carries no timing of
 its own — set the frame rate at import).
 
+> **Crop to caption band** (Export tab, on by default) exports just the
+> horizontal **strip** the captions sit in instead of the whole frame, so long
+> clips render **~3–4× faster** and the file is smaller. The strip is aligned to
+> your caption position — **bottom-aligned captions keep the same bottom edge**,
+> so you drop it in and bottom-align exactly as before; the `README.txt` states
+> the exact `X=0, Y=…` placement for top/middle layouts. Untick it for a
+> full-frame overlay you drop at `0,0`.
+
 - **Premiere:** File ▸ Import ▸ select `cap_00000.png` ▸ tick **Image Sequence**.
 - **After Effects / DaVinci Resolve / Final Cut:** import the folder as a PNG
   sequence — the alpha is read automatically. Drop it on a track above your video.
