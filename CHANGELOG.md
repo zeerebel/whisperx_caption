@@ -4,6 +4,15 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.11.1 — Fix .mov export (regression from v1.11.0)
+- The one-click transparent **`.mov`** export failed on **both** codecs with
+  *"ArrayBuffer at index 0 is already detached"*. Cause: the v1.11.0 silent-gap
+  frame reuse handed ffmpeg.wasm the **same** byte array for every gap frame, but
+  `writeFile` *transfers* (detaches) that array's buffer to its worker — so the
+  second gap frame passed an already-detached buffer. Fixed by caching a pristine
+  copy and giving ffmpeg a fresh copy per write. (The PNG-sequence export was
+  unaffected — its ZIP writer only reads the bytes.)
+
 ## v1.11.0 — Caption-band export (much faster on long clips)
 - **Crop to caption band** (Export tab, on by default): the transparent PNG
   sequence and one-click `.mov` now render only the horizontal **strip** the

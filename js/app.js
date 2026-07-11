@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.11.0";
+  const APP_VERSION = "1.11.1";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -959,7 +959,10 @@
       off.width = w; off.height = canvasH;
       const octx = off.getContext("2d", { alpha: true });
       octx.setTransform(1, 0, 0, 1, 0, -yOff); // rasterise only the strip (see PNG-sequence export)
-      let emptyBytes = null;                    // reuse one blank frame for every silent gap
+      // Reuse one blank frame for every silent gap. ff.writeFile TRANSFERS (and
+      // thus detaches) the array's buffer to the worker, so keep the cached copy
+      // pristine and hand ffmpeg a fresh copy each time instead of the same array.
+      let emptyBytes = null;
       for (let i = 0; i < frameCount; i++) {
         checkCancel();
         const t = i / fps;
@@ -967,13 +970,13 @@
         const name = `cap_${String(i).padStart(5, "0")}.png`;
         let bytes;
         if (!cue && emptyBytes) {
-          bytes = emptyBytes;
+          bytes = emptyBytes.slice();           // disposable copy — writeFile will detach it
         } else {
           WXC.render.drawCaption(octx, cue, style, t, w, h, anim);
           const blob = await new Promise((res) => off.toBlob(res, "image/png"));
           if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
           bytes = new Uint8Array(await blob.arrayBuffer());
-          if (!cue) emptyBytes = bytes;
+          if (!cue) emptyBytes = bytes.slice(); // cache a copy ffmpeg never touches
         }
         await ff.writeFile(name, bytes);
         names.push(name);
