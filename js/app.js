@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.11.0";
+  const APP_VERSION = "1.12.0";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -576,14 +576,38 @@
     } catch (e) {}
   }
 
+  // Vertical headroom the SELECTED animation actually needs: its peak travel
+  // plus the extra half-height any scale-up adds around the block center.
+  // Mirrors the displacements in render.js lineTransform/wordTransform; the
+  // ids not listed (none, fade-in, wipe-reveal, typewriter, color-flash) move
+  // nothing vertically and need zero.
+  function animHeadroom(anim, fontPx, blockH, scale) {
+    const k = Math.max(anim && anim.intensity != null ? anim.intensity : 1, 0);
+    switch (anim && anim.id) {
+      case "slide-up": case "slide-down": return fontPx * 1.1 * k;
+      case "drop-in-gravity": return 90 * k * scale;
+      case "rise-float": return 30 * k * scale;
+      case "blur-in": return 30 * k * scale;             // blur bleeds past the glyphs
+      case "shake": return 7 * k * scale;
+      case "wave": return 8 * k * scale;
+      case "word-fade-cascade": return 9 * k * scale;
+      case "zoom-in": return blockH * 0.3 * k;            // starts at scale 1 + 0.6k
+      case "bounce-in": return blockH * 0.2;              // outElastic overshoots to ~1.37
+      case "pop-scale-in": return blockH * 0.06;          // outBack overshoot ≈ 1.1
+      case "word-pop-in": return fontPx * 0.1;            // per-word outBack overshoot
+      default: return 0;
+    }
+  }
+
   // Captions only ever fill a horizontal band (a lower-third), so exporting the
   // WHOLE frame every tick wastes most of the per-frame cost (clear + PNG encode
   // scale with pixel count). This finds the smallest vertical band [top, top+height]
   // that contains EVERY cue across the clip — using the same layout the renderer
-  // uses — padded for outline/shadow/box and animation motion, then anchored to
-  // the caption's own alignment so placement stays trivial (a bottom-aligned strip
-  // keeps the frame's bottom edge). Returns null when a band gives no real win
-  // (e.g. middle-aligned text that spans most of the frame) → fall back to full.
+  // uses — padded for outline/shadow/box and the selected animation's real
+  // vertical travel, then anchored to the caption's own alignment so placement
+  // stays trivial (a bottom-aligned strip keeps the frame's bottom edge).
+  // Returns null when a band gives no real win (e.g. middle-aligned text that
+  // spans most of the frame) → fall back to full.
   function computeCaptionBand(style, anim, w, h) {
     if (!state.cues.length) return null;
     const meas = document.createElement("canvas").getContext("2d");
@@ -597,17 +621,17 @@
     }
     if (!isFinite(minY)) return null;
     const fontPx = style.size * scale;
-    const k = anim && anim.intensity != null ? anim.intensity : 1;
     const blockH = maxY - minY;
-    // Headroom: box padding + outline + shadow, plus the largest vertical travel
-    // any animation can add (drop-in ≈ 96·scale up, slide ≈ fontPx·1.1, rise/wave
-    // smaller) and the extra half-height a zoom/pop scale-up needs around center.
+    // Headroom: box padding (only when the box is actually drawn) + outline +
+    // shadow (blur + offset), the animation's real travel, and a glyph-overflow
+    // margin (ascenders/descenders/diacritics past the em box, the active-word
+    // pill) — sized to the caption instead of a worst-case constant.
     const pad =
-      style.boxPad * scale +
+      (style.boxOpacity > 0.02 ? style.boxPad * scale : 0) +
       style.outline * scale * 2 +
       style.shadow * scale * 2 +
-      Math.max(fontPx * 1.3, 120 * scale) * Math.max(k, 1) +
-      blockH * 0.4 +
+      animHeadroom(anim, fontPx, blockH, scale) +
+      fontPx * 0.35 +
       8 * scale;
     let top = Math.floor(minY - pad);
     let bot = Math.ceil(maxY + pad);
@@ -621,6 +645,63 @@
     if (height % 2) { if (bot < h) bot++; else if (top > 0) top--; height = bot - top; } // even dims for codecs
     if (height < 2) return null;
     return { top, height, w, h };
+  }
+
+  // Shared frame walk for the PNG-sequence and .mov exports: renders each frame
+  // (cropped to the band when given), encodes it to PNG bytes and hands
+  // (name, bytes, cached) to sink in order. Two reuse caches keep long clips
+  // cheap: ONE blank frame serves every silent gap, and a caption that nothing
+  // animates (no intro effect, no karaoke/pill word color) is encoded once and
+  // reused for its whole hold. `cached` tells the sink those bytes will be
+  // needed again, so it must not consume them destructively.
+  async function renderExportFrames(w, h, fps, frameCount, style, anim, band, sink) {
+    const canvasH = band ? band.height : h;
+    const yOff = band ? band.top : 0;
+    const off = document.createElement("canvas");
+    off.width = w; off.height = canvasH;
+    const octx = off.getContext("2d", { alpha: true });
+    // Sizing the canvas resets its transform; shift the origin up by the band's
+    // top so drawCaption keeps using the FULL frame geometry but only the strip
+    // is rasterised. drawCaption's own save/restore leave this base transform intact.
+    octx.setTransform(1, 0, 0, 1, 0, -yOff);
+    const staticStyle = anim.id === "none";
+    const cueIsStatic = (cue) =>
+      staticStyle && (!cue.words || !cue.words.length || (!style.karaoke && !style.activePill));
+    // Cues are time-ordered, so one monotonic pointer replaces an O(cues) scan
+    // per frame (the scan cost is O(frames × cues) over a long transcript).
+    // Sorting a copy guards against an out-of-order SRT without touching the
+    // live cue array (its indices map 1:1 to model segments for editing).
+    const cues = state.cues.slice().sort((a, b) => a.start - b.start || a.end - b.end);
+    let ci = 0;
+    let emptyBytes = null;                 // blank frame, reused for every silent gap
+    let holdIdx = -1, holdBytes = null;    // static caption, reused across its hold
+    try {
+      for (let i = 0; i < frameCount; i++) {
+        checkCancel();
+        const t = i / fps;
+        while (ci < cues.length && cues[ci].end < t) ci++;
+        const cue = ci < cues.length && t >= cues[ci].start ? cues[ci] : null;
+        const name = `cap_${String(i).padStart(5, "0")}.png`;
+        let bytes;
+        if (!cue && emptyBytes) bytes = emptyBytes;
+        else if (cue && ci === holdIdx) bytes = holdBytes;
+        else {
+          WXC.render.drawCaption(octx, cue, style, t, w, h, anim);
+          const blob = await new Promise((res) => off.toBlob(res, "image/png"));
+          if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
+          bytes = new Uint8Array(await blob.arrayBuffer());
+          if (!cue) emptyBytes = bytes;
+          else if (cueIsStatic(cue)) { holdIdx = ci; holdBytes = bytes; }
+        }
+        await sink(name, bytes, bytes === emptyBytes || bytes === holdBytes);
+        if (i % 4 === 0) {
+          $("exportProgress").textContent = `Rendering frame ${i + 1} / ${frameCount}…`;
+          await new Promise((r) => setTimeout(r, 0));
+        }
+      }
+    } finally {
+      off.width = off.height = 0; // drop the (up to 4K) canvas backing store
+    }
   }
 
   async function exportPngSequence() {
@@ -659,40 +740,14 @@
     await ensureFontsForExport(style, h);
     const band = ($("optCropBand") && $("optCropBand").checked) ? computeCaptionBand(style, anim, w, h) : null;
     const canvasH = band ? band.height : h;
-    const yOff = band ? band.top : 0;
-    const off = document.createElement("canvas");
-    off.width = w; off.height = canvasH;
-    const octx = off.getContext("2d", { alpha: true });
-    // Sizing the canvas resets its transform; shift the origin up by the band's
-    // top so drawCaption keeps using the FULL frame geometry but only the strip
-    // is rasterised. drawCaption's own save/restore leave this base transform intact.
-    octx.setTransform(1, 0, 0, 1, 0, -yOff);
     const frames = [];
-    let emptyBytes = null;   // encode a blank (no-caption) frame once, reuse it for every silent gap
     const zw = writable ? WXC.zip.createZipStream((bytes) => writable.write(bytes)) : null;
     try {
-      for (let i = 0; i < frameCount; i++) {
-        checkCancel();
-        const t = i / fps;
-        const cue = cueAt(t);
-        const name = `cap_${String(i).padStart(5, "0")}.png`;
-        let bytes;
-        if (!cue && emptyBytes) {
-          bytes = emptyBytes;                     // identical transparent frame → no re-encode
-        } else {
-          WXC.render.drawCaption(octx, cue, style, t, w, h, anim);
-          const blob = await new Promise((res) => off.toBlob(res, "image/png"));
-          if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
-          bytes = new Uint8Array(await blob.arrayBuffer());
-          if (!cue) emptyBytes = bytes;
-        }
-        if (zw) await zw.add(name, bytes);
-        else frames.push({ name, blob: new Blob([bytes], { type: "image/png" }) });
-        if (i % 4 === 0) {
-          $("exportProgress").textContent = `Rendering frame ${i + 1} / ${frameCount}…`;
-          await new Promise((r) => setTimeout(r, 0));
-        }
-      }
+      // Both sinks copy the bytes they keep (crc/write reads them; Blob copies),
+      // so cached frames can be reused freely.
+      await renderExportFrames(w, h, fps, frameCount, style, anim, band, (name, bytes) =>
+        zw ? zw.add(name, bytes)
+           : void frames.push({ name, blob: new Blob([bytes], { type: "image/png" }) }));
       const placement = band
         ? `\nNOTE: these frames are a CROPPED caption strip — ${w}x${canvasH}px out of a ${w}x${h}\n` +
           `frame (rendered smaller so it exports fast and stays small).\n` +
@@ -729,7 +784,6 @@
       reportExportError(e, "Export failed: ");
     } finally {
       if (writable) { try { await writable.abort(); } catch (e) {} } // cancelled/failed mid-stream → discard the partial file
-      off.width = off.height = 0; // drop the (up to 4K) canvas backing store
       setExportBusy(false);
     }
   }
@@ -949,39 +1003,20 @@
       return;
     }
     const names = [];
-    const off = document.createElement("canvas");
     let terminated = false;
+    let canvasH = h, band = null;
     try {
       await ensureFontsForExport(style, h);
-      const band = ($("optCropBand") && $("optCropBand").checked) ? computeCaptionBand(style, anim, w, h) : null;
-      const canvasH = band ? band.height : h;
-      const yOff = band ? band.top : 0;
-      off.width = w; off.height = canvasH;
-      const octx = off.getContext("2d", { alpha: true });
-      octx.setTransform(1, 0, 0, 1, 0, -yOff); // rasterise only the strip (see PNG-sequence export)
-      let emptyBytes = null;                    // reuse one blank frame for every silent gap
-      for (let i = 0; i < frameCount; i++) {
-        checkCancel();
-        const t = i / fps;
-        const cue = cueAt(t);
-        const name = `cap_${String(i).padStart(5, "0")}.png`;
-        let bytes;
-        if (!cue && emptyBytes) {
-          bytes = emptyBytes;
-        } else {
-          WXC.render.drawCaption(octx, cue, style, t, w, h, anim);
-          const blob = await new Promise((res) => off.toBlob(res, "image/png"));
-          if (!blob) throw new Error(`PNG encode failed at frame ${i} — try a lower resolution.`);
-          bytes = new Uint8Array(await blob.arrayBuffer());
-          if (!cue) emptyBytes = bytes;
-        }
-        await ff.writeFile(name, bytes);
+      band = ($("optCropBand") && $("optCropBand").checked) ? computeCaptionBand(style, anim, w, h) : null;
+      canvasH = band ? band.height : h;
+      // ff.writeFile TRANSFERS the byte buffer into the worker (detaching it
+      // on this side), so hand it a copy of any bytes the renderer will reuse
+      // — passing the cache itself detaches it and the next reuse throws
+      // "ArrayBuffer is already detached", killing the export.
+      await renderExportFrames(w, h, fps, frameCount, style, anim, band, async (name, bytes, cached) => {
+        await ff.writeFile(name, cached ? bytes.slice() : bytes);
         names.push(name);
-        if (i % 4 === 0) {
-          $("exportProgress").textContent = `Rendering frame ${i + 1} / ${frameCount}…`;
-          await new Promise((r) => setTimeout(r, 0));
-        }
-      }
+      });
       $("exportProgress").textContent = `Encoding transparent .mov (${codec.label})…`;
       ffLogRing.length = 0;
       // A wedged encode would otherwise spin forever. Give it a budget that
@@ -1041,7 +1076,6 @@
         for (const n of names) { try { await ff.deleteFile(n); } catch (err) {} }
         try { await ff.deleteFile("out.mov"); } catch (err) {}
       }
-      off.width = off.height = 0;
       setExportBusy(false);
     }
   }
