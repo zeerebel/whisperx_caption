@@ -5,3 +5,5 @@ package.json
 package-lock.json
 wrangler.toml
 .assetsignore
+.git/
+.wrangler/
