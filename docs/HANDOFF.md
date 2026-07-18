@@ -1,6 +1,6 @@
 # Handoff — WhisperX Caption Studio
 
-Snapshot to continue in a fresh session/thread. Written 2026-07-07, updated 2026-07-18.
+Snapshot to continue in a fresh session/thread. Written 2026-07-07, last updated 2026-07-18.
 
 ## What the app is
 A 100%-client-side web app that turns a WhisperX transcript (`.json` / `.srt` /
@@ -19,18 +19,18 @@ use. That's why it's free.
   confirm which build is live.
 
 ## Current version state
-- **Live on main: v1.12.0** (PR #27, merged 2026-07-18) — fixed the `.mov`
-  export that v1.11.0 had broken for almost every clip (ffmpeg's `writeFile`
-  *transfers/detaches* the buffer, so the cached blank-frame bytes died on
-  first reuse → "ArrayBuffer is already detached" on any clip with more than
-  one silent frame), sized the caption strip to the caption + the selected
-  animation's real travel instead of a ≥120 px worst case (strip shrank
-  ~374px → ~232px on the 1080p sample), added static-caption-hold reuse (one
-  encode per unanimated cue), and made per-frame cue lookup O(1). Both video
-  exporters share `renderExportFrames`.
-- **v1.12.1, done this session, not yet pushed/PR'd** (branch
-  `claude/github-handoff-md-review-zgo1b9`) — fixes two problems the app's
-  owner hit in real use:
+- **Live on main: v1.12.1** (PR #27 → v1.12.0, PR #28 → v1.12.1, both merged
+  2026-07-18) — confirmed actually serving live via a clean Cloudflare deploy
+  log (see "Deploy pipeline was silently landing stale builds" below).
+- **v1.12.0** (PR #27) fixed the `.mov` export that v1.11.0 had broken for
+  almost every clip (ffmpeg's `writeFile` *transfers/detaches* the buffer, so
+  the cached blank-frame bytes died on first reuse → "ArrayBuffer is already
+  detached" on any clip with more than one silent frame), sized the caption
+  strip to the caption + the selected animation's real travel instead of a
+  ≥120 px worst case (strip shrank ~374px → ~232px on the 1080p sample), added
+  static-caption-hold reuse (one encode per unanimated cue), and made
+  per-frame cue lookup O(1). Both video exporters share `renderExportFrames`.
+- **v1.12.1** (PR #28) fixed two problems the app's owner hit in real use:
   1. **A 10+ hour export that never finished.** Root cause: the export loop
      yielded to the browser every 4 frames via `setTimeout`, and browsers
      clamp timers hard in **backgrounded tabs** — Chrome's intensive
@@ -42,7 +42,7 @@ use. That's why it's free.
      a frame count — far fewer clamp-exposed timers — plus a visible warning
      (progress line + toast) when the tab goes hidden mid-export, telling the
      user to keep it visible. This is a mitigation, not the cure — see open
-     thread #2 below for the real fix.
+     thread #1 below for the real fix.
   2. **Exports that still looked full-screen.** `computeCaptionBand` silently
      falls back to a full-frame export when the computed band would cover
      almost the whole frame (large font + high animation intensity + tall
@@ -53,11 +53,47 @@ use. That's why it's free.
   - Implemented by a subagent (Fable model) on maintainer instruction, code
     reviewed by the orchestrating session, `node --check` passes. **Not
     verified in a real browser** (no browser harness in this environment) —
-    spot-check before/after shipping: start a long export, switch tabs away
-    and back, confirm the warning/toast appear and the export still
-    completes; also confirm the PNG-sequence success line now shows
-    dimensions.
+    spot-check: start a long export, switch tabs away and back, confirm the
+    warning/toast appear and the export still completes; also confirm the
+    PNG-sequence success line now shows dimensions.
 - Full history in `CHANGELOG.md`.
+
+## Deploy pipeline was silently landing stale builds (fixed, PR #29)
+After merging #27 and #28, the live site kept serving old `js/app.js`
+(`APP_VERSION` stuck at `1.12.0` even after #28 shipped `1.12.1`) despite
+`.github/workflows/deploy.yml` showing a **green** checkmark both times.
+Reading the *actual* Wrangler output (not just the job conclusion) showed why:
+
+```
++ /.git/shallow
++ /.git/objects/6c/6587b560ad70e266cde6328cdd7c8df9f54184
++ /.git/config
++ /.git/index
+...
+Asset upload failed. Retrying...
+ APIError: Received a malformed response from the API
+```
+
+`wrangler.toml` sets `[assets].directory = "."` (the whole repo root), so
+`.assetsignore` is the *only* thing keeping non-site files out of the
+Cloudflare upload — and it never excluded `.git/`. Since `actions/checkout@v4`
+does a fresh shallow clone every run, `.git`'s internal objects/refs are
+different on every single deploy, so they always look like "new or modified"
+assets to Wrangler, and Cloudflare's assets-upload-session API can't handle
+them — corrupting the upload partway through. **`cloudflare/wrangler-action@v3`
+did not fail the GitHub Actions job when this happened**, so there was no
+visible signal anything was wrong; the job just quietly redeployed whatever
+assets *did* make it through (i.e., stale ones for anything queued after the
+first `.git` object it choked on).
+
+Fix (PR #29): added `.git/` and `.wrangler/` to `.assetsignore`. Confirmed
+fixed — the next deploy uploaded exactly the 3 files that had actually
+changed (`CHANGELOG.md`, `docs/HANDOFF.md`, `js/app.js`), no `.git` paths in
+the list, completed in 28s (vs. 1+ minute of retries before), and printed a
+clean `Current Version ID`. **If a future deploy ever "succeeds" but the
+footer version doesn't match what you just shipped, don't trust the green
+checkmark — pull the actual job log and look for `Asset upload failed` /
+`malformed response` before assuming it's a caching issue.**
 
 ## Performance: caption-band export (v1.11.0) — why long exports were slow
 The motivating bug: a **23-minute** transcript exported for **3 hours and was
@@ -170,12 +206,11 @@ Notes:
 - Testing was done with headless Playwright scripts kept in the scratchpad
   (not committed): serve the repo, drive the real UI, screenshot at 320/390/
   1280, and assert exports/edits. Re-create as needed.
+- **A green deploy checkmark does not guarantee the live site updated** — see
+  "Deploy pipeline was silently landing stale builds" above.
 
 ## Open threads
-1. **Push v1.12.1 and open a PR** (see above) — the fixes exist on
-   `claude/github-handoff-md-review-zgo1b9` but aren't committed/pushed yet
-   as of this writing.
-2. **The real fix for background-tab stalls: move frame-render + PNG-encode
+1. **The real fix for background-tab stalls: move frame-render + PNG-encode
    into a Web Worker + OffscreenCanvas.** v1.12.1's wall-time yield + hidden-tab
    warning are mitigations (fewer clamp-exposed timers, and telling the user
    why it's slow) — they don't eliminate the throttling, they reduce exposure
@@ -184,23 +219,23 @@ Notes:
    deserves its own session; the ffmpeg encode itself already runs in a
    Worker, only the canvas render + PNG encode (`renderExportFrames`) is on
    the main thread today.
-3. **Let the user trim the export time range.** Probably the single biggest
+2. **Let the user trim the export time range.** Probably the single biggest
    lever for "exports take too long" generically — most exports don't need
    the full clip, and a shorter range beats optimizing the encode of frames
    nobody wants. Not built yet.
-4. **Screen Wake Lock during export** (`navigator.wakeLock`) — a different
+3. **Screen Wake Lock during export** (`navigator.wakeLock`) — a different
    failure mode than tab-backgrounding: if the laptop screen locks/sleeps,
    JS execution pauses entirely until manually woken, which would also
    explain an export that "ran overnight and never finished." Cheap to add,
    not done.
-5. **ProRes 4444 is known-slow/OOM-prone in-browser** (see Gotchas above) —
+4. **ProRes 4444 is known-slow/OOM-prone in-browser** (see Gotchas above) —
    worth a stronger nudge toward qtrle (already the default) or the PNG
    sequence + external `ffmpeg` command for anyone who picks it anyway.
-6. **In-memory PNG-sequence fallback can OOM on long exports** in browsers
+5. **In-memory PNG-sequence fallback can OOM on long exports** in browsers
    without the File System Access API (Firefox, Safari) — the
    streaming-straight-to-disk path (`showSaveFilePicker`) only exists on
    Chromium. Not addressed.
-7. **Premium Cloud Transcribe** — full plan in `docs/PREMIUM_PLAN.md`, and a
+6. **Premium Cloud Transcribe** — full plan in `docs/PREMIUM_PLAN.md`, and a
    draft implementation exists in (closed, unmerged) PR #23 — Cloudflare
    Worker + Replicate WhisperX + a "Cloud Transcribe" panel, fully inert
    until `REPLICATE_API_TOKEN`/`TRANSCRIBE_PASSPHRASE` secrets are set. User
@@ -208,8 +243,9 @@ Notes:
    with a waitlist button before building billing.
 
 ## PR housekeeping (2026-07-18)
-- **#25** (v1.11.0 caption-band) and **#27** (v1.12.0 `.mov` fix + strip
-  sizing) — merged.
+- **#25** (v1.11.0 caption-band), **#27** (v1.12.0 `.mov` fix + strip sizing),
+  **#28** (v1.12.1 background-tab stall + silent-crop-skip fixes), **#29**
+  (deploy pipeline fix, see above) — merged.
 - **#26** (older `.mov` detached-buffer fix), **#24** (earlier horizontal-strip
   approach, predates #25), **#17** (frame de-dup, predates several shipped
   versions) — closed as superseded/stale.
