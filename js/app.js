@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.12.0";
+  const APP_VERSION = "1.12.1";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -675,6 +675,12 @@
     let ci = 0;
     let emptyBytes = null;                 // blank frame, reused for every silent gap
     let holdIdx = -1, holdBytes = null;    // static caption, reused across its hold
+    // Yield on wall time, not frame count: hidden tabs clamp setTimeout (Chrome's
+    // intensive throttling fires timers as little as once a MINUTE), so every
+    // yield is a potential minute-long stall. ~60ms between yields keeps the UI
+    // live in the foreground while cutting the number of clamp-exposed timers
+    // by orders of magnitude.
+    let lastYield = performance.now();
     try {
       for (let i = 0; i < frameCount; i++) {
         checkCancel();
@@ -694,9 +700,11 @@
           else if (cueIsStatic(cue)) { holdIdx = ci; holdBytes = bytes; }
         }
         await sink(name, bytes, bytes === emptyBytes || bytes === holdBytes);
-        if (i % 4 === 0) {
-          $("exportProgress").textContent = `Rendering frame ${i + 1} / ${frameCount}…`;
+        if (performance.now() - lastYield > 60) {
+          // Don't clobber the hidden-tab warning while backgrounded.
+          if (!document.hidden) $("exportProgress").textContent = `Rendering frame ${i + 1} / ${frameCount}…`;
           await new Promise((r) => setTimeout(r, 0));
+          lastYield = performance.now();
         }
       }
     } finally {
@@ -738,7 +746,8 @@
     setExportBusy(true);
     pause();
     await ensureFontsForExport(style, h);
-    const band = ($("optCropBand") && $("optCropBand").checked) ? computeCaptionBand(style, anim, w, h) : null;
+    const cropWanted = !!($("optCropBand") && $("optCropBand").checked);
+    const band = cropWanted ? computeCaptionBand(style, anim, w, h) : null;
     const canvasH = band ? band.height : h;
     const frames = [];
     const zw = writable ? WXC.zip.createZipStream((bytes) => writable.write(bytes)) : null;
@@ -778,7 +787,15 @@
         const zip = await WXC.zip.createStoreZipFromBlobs(frames);
         WXC.zip.downloadBlob(zip, zipName);
       }
-      $("exportProgress").textContent = `✓ ${frameCount} transparent frames exported`;
+      // State the output size and crop outcome on screen — a silently skipped
+      // crop otherwise reads as "the crop feature doesn't work".
+      const cropNote = band
+        ? ` — ${w}×${canvasH} strip; place at Y=${band.top} in a ${w}×${h} frame` +
+          (band.top + canvasH >= h ? " (bottom-aligned)" : "")
+        : cropWanted
+        ? ` — ${w}×${h} full frame (crop skipped — caption span too large to benefit)`
+        : ` — ${w}×${h} full frame`;
+      $("exportProgress").textContent = `✓ ${frameCount} transparent frames exported${cropNote}`;
       toast("✓ PNG sequence exported");
     } catch (e) {
       reportExportError(e, "Export failed: ");
@@ -1005,9 +1022,10 @@
     const names = [];
     let terminated = false;
     let canvasH = h, band = null;
+    const cropWanted = !!($("optCropBand") && $("optCropBand").checked);
     try {
       await ensureFontsForExport(style, h);
-      band = ($("optCropBand") && $("optCropBand").checked) ? computeCaptionBand(style, anim, w, h) : null;
+      band = cropWanted ? computeCaptionBand(style, anim, w, h) : null;
       canvasH = band ? band.height : h;
       // ff.writeFile TRANSFERS the byte buffer into the worker (detaching it
       // on this side), so hand it a copy of any bytes the renderer will reuse
@@ -1057,6 +1075,8 @@
       const placeMsg = band
         ? ` — ${w}×${canvasH} strip; place at Y=${band.top} in a ${w}×${h} frame` +
           (band.top + canvasH >= h ? " (bottom-aligned)" : "")
+        : cropWanted
+        ? " — full frame (crop skipped — caption span too large to benefit)"
         : "";
       $("exportProgress").textContent = `✓ Transparent .mov exported (${w}×${canvasH}, ${fps}fps, ${codec.label})${placeMsg}`;
       toast("✓ Transparent .mov exported");
@@ -1451,6 +1471,25 @@
     document.addEventListener("keydown", (e) => {
       if (e.code === "Space" && !/INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) {
         e.preventDefault(); state.playing ? pause() : play();
+      }
+    });
+
+    // Hidden tabs get their timers clamped hard (Chrome: down to once a
+    // minute), which can stretch an export from minutes into hours. Put the
+    // warning in the progress line while hidden, and toast on return — the
+    // moment the user can actually see it.
+    const HIDDEN_WARN = "⚠️ This tab is in the background — browsers slow hidden tabs down DRAMATICALLY. Keep this tab visible until the export finishes.";
+    let progressBeforeHidden = null;
+    document.addEventListener("visibilitychange", () => {
+      if (!state.exporting) return;
+      if (document.hidden) {
+        progressBeforeHidden = $("exportProgress").textContent;
+        $("exportProgress").textContent = HIDDEN_WARN;
+      } else {
+        if ($("exportProgress").textContent === HIDDEN_WARN && progressBeforeHidden != null)
+          $("exportProgress").textContent = progressBeforeHidden;
+        progressBeforeHidden = null;
+        toast("⚠️ Keep this tab visible — hidden tabs are throttled and the export slows to a crawl");
       }
     });
 

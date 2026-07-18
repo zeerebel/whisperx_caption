@@ -1,6 +1,6 @@
 # Handoff — WhisperX Caption Studio
 
-Snapshot to continue in a fresh session/thread. Written 2026-07-07.
+Snapshot to continue in a fresh session/thread. Written 2026-07-07, updated 2026-07-18.
 
 ## What the app is
 A 100%-client-side web app that turns a WhisperX transcript (`.json` / `.srt` /
@@ -19,14 +19,44 @@ use. That's why it's free.
   confirm which build is live.
 
 ## Current version state
-- **Live on main: v1.11.0** (caption-band export merged via PR #25).
-- **In progress: v1.12.0** on branch `claude/export-caption-sizing-e85vyx` —
-  fixes the `.mov` export v1.11.0 broke (ffmpeg's writeFile *transfers/detaches*
-  the buffer, so the cached blank-frame bytes died on first use → "ArrayBuffer
-  is already detached" on every clip with silence), sizes the strip to the
-  caption + the selected animation's real travel instead of a ≥120 px worst
-  case, reuses one encode per static caption hold, and makes per-frame cue
-  lookup O(1). Both video exporters now share `renderExportFrames`.
+- **Live on main: v1.12.0** (PR #27, merged 2026-07-18) — fixed the `.mov`
+  export that v1.11.0 had broken for almost every clip (ffmpeg's `writeFile`
+  *transfers/detaches* the buffer, so the cached blank-frame bytes died on
+  first reuse → "ArrayBuffer is already detached" on any clip with more than
+  one silent frame), sized the caption strip to the caption + the selected
+  animation's real travel instead of a ≥120 px worst case (strip shrank
+  ~374px → ~232px on the 1080p sample), added static-caption-hold reuse (one
+  encode per unanimated cue), and made per-frame cue lookup O(1). Both video
+  exporters share `renderExportFrames`.
+- **v1.12.1, done this session, not yet pushed/PR'd** (branch
+  `claude/github-handoff-md-review-zgo1b9`) — fixes two problems the app's
+  owner hit in real use:
+  1. **A 10+ hour export that never finished.** Root cause: the export loop
+     yielded to the browser every 4 frames via `setTimeout`, and browsers
+     clamp timers hard in **backgrounded tabs** — Chrome's intensive
+     throttling can fire them as little as once a *minute*. A long clip has
+     thousands of those yields (~10,000 on a 23-minute clip at 30fps); the
+     moment the tab isn't in the foreground, each one is a potential
+     minute-long stall — easily adding up to "still not done after 10
+     hours." Fix: yield on wall time (~60ms since the last yield) instead of
+     a frame count — far fewer clamp-exposed timers — plus a visible warning
+     (progress line + toast) when the tab goes hidden mid-export, telling the
+     user to keep it visible. This is a mitigation, not the cure — see open
+     thread #2 below for the real fix.
+  2. **Exports that still looked full-screen.** `computeCaptionBand` silently
+     falls back to a full-frame export when the computed band would cover
+     almost the whole frame (large font + high animation intensity + tall
+     caption span) — with zero indication, so it read as "the crop feature
+     doesn't work." Both exporters now say so on screen when it happens, and
+     the PNG-sequence success line now states output dimensions/placement at
+     all (it previously said nothing; the `.mov` line already did).
+  - Implemented by a subagent (Fable model) on maintainer instruction, code
+    reviewed by the orchestrating session, `node --check` passes. **Not
+    verified in a real browser** (no browser harness in this environment) —
+    spot-check before/after shipping: start a long export, switch tabs away
+    and back, confirm the warning/toast appear and the export still
+    completes; also confirm the PNG-sequence success line now shows
+    dimensions.
 - Full history in `CHANGELOG.md`.
 
 ## Performance: caption-band export (v1.11.0) — why long exports were slow
@@ -142,15 +172,49 @@ Notes:
   1280, and assert exports/edits. Re-create as needed.
 
 ## Open threads
-1. **Merge the v1.12.0 PR** (branch `claude/export-caption-sizing-e85vyx`) —
-   without it the one-click `.mov` export on main is broken.
-2. **Further export speedups if still needed:** band, blank-gap reuse and
-   static-hold reuse are done. Next levers (not done): a Web Worker /
-   OffscreenCanvas encode so the tab stays responsive, and letting the user
-   trim the export time range.
-3. **Premium Cloud Transcribe** — full plan in `docs/PREMIUM_PLAN.md`. User has
-   Supabase + Stripe already; recommended GPU = Replicate; API glue = a
-   Cloudflare Worker; validate with a waitlist button before building billing.
+1. **Push v1.12.1 and open a PR** (see above) — the fixes exist on
+   `claude/github-handoff-md-review-zgo1b9` but aren't committed/pushed yet
+   as of this writing.
+2. **The real fix for background-tab stalls: move frame-render + PNG-encode
+   into a Web Worker + OffscreenCanvas.** v1.12.1's wall-time yield + hidden-tab
+   warning are mitigations (fewer clamp-exposed timers, and telling the user
+   why it's slow) — they don't eliminate the throttling, they reduce exposure
+   to it and communicate it. Doing the actual render/encode off the main
+   thread sidesteps page-visibility timer throttling entirely. Bigger lift,
+   deserves its own session; the ffmpeg encode itself already runs in a
+   Worker, only the canvas render + PNG encode (`renderExportFrames`) is on
+   the main thread today.
+3. **Let the user trim the export time range.** Probably the single biggest
+   lever for "exports take too long" generically — most exports don't need
+   the full clip, and a shorter range beats optimizing the encode of frames
+   nobody wants. Not built yet.
+4. **Screen Wake Lock during export** (`navigator.wakeLock`) — a different
+   failure mode than tab-backgrounding: if the laptop screen locks/sleeps,
+   JS execution pauses entirely until manually woken, which would also
+   explain an export that "ran overnight and never finished." Cheap to add,
+   not done.
+5. **ProRes 4444 is known-slow/OOM-prone in-browser** (see Gotchas above) —
+   worth a stronger nudge toward qtrle (already the default) or the PNG
+   sequence + external `ffmpeg` command for anyone who picks it anyway.
+6. **In-memory PNG-sequence fallback can OOM on long exports** in browsers
+   without the File System Access API (Firefox, Safari) — the
+   streaming-straight-to-disk path (`showSaveFilePicker`) only exists on
+   Chromium. Not addressed.
+7. **Premium Cloud Transcribe** — full plan in `docs/PREMIUM_PLAN.md`, and a
+   draft implementation exists in (closed, unmerged) PR #23 — Cloudflare
+   Worker + Replicate WhisperX + a "Cloud Transcribe" panel, fully inert
+   until `REPLICATE_API_TOKEN`/`TRANSCRIBE_PASSPHRASE` secrets are set. User
+   has Supabase + Stripe already for the eventual billed version; validate
+   with a waitlist button before building billing.
+
+## PR housekeeping (2026-07-18)
+- **#25** (v1.11.0 caption-band) and **#27** (v1.12.0 `.mov` fix + strip
+  sizing) — merged.
+- **#26** (older `.mov` detached-buffer fix), **#24** (earlier horizontal-strip
+  approach, predates #25), **#17** (frame de-dup, predates several shipped
+  versions) — closed as superseded/stale.
+- **#23** (Cloud Transcribe + hero `.mov` button) — still open as a draft, not
+  merged; separate track from the export-reliability work above.
 
 ## What shipped this session (from the original "fix the handoff" task)
 Handoff bug fixes (persistent edits, export cancel/streaming) → the whole `.mov`

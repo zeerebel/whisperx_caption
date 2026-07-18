@@ -4,6 +4,28 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.12.1 — Background-tab export stalls; crop feedback
+- **Fixed: an export left in a background tab could take hours** (a real one
+  ran 10+ hours without finishing). The frame loop yielded to the browser
+  every 4 frames via `setTimeout`, and browsers clamp timers in hidden tabs
+  hard — Chrome's "intensive throttling" fires them as little as **once a
+  minute**. A long clip has thousands of those yield points (~10,000 on a
+  23-minute clip at 30 fps), each a potential minute-long stall the moment
+  you switch tabs. The loop now yields on wall time (~60 ms since the last
+  yield) instead of a frame count, which cuts the number of clamp-exposed
+  timers by orders of magnitude *and* speeds up the foreground case. The app
+  also warns while an export is running in a hidden tab (progress line while
+  hidden, toast when you return): keep the tab visible until it finishes.
+- **Crop-to-band no longer skips silently.** When the computed caption strip
+  would cover nearly the whole frame (huge font + tall animation travel +
+  wide vertical span), the exporters legitimately fall back to full-frame —
+  but with no indication, which read as "the crop doesn't work / still full
+  screen". Both the PNG-sequence and `.mov` success lines now say the crop
+  was skipped and why.
+- The PNG-sequence success line now states the output dimensions and strip
+  placement (the `.mov` line already did), so you can confirm the crop from
+  the UI instead of opening the zip's README.txt.
+
 ## v1.12.0 — Fix broken .mov export; much tighter caption strip
 - **Fixed: the one-click `.mov` export failed** ("ArrayBuffer is already
   detached") on any clip with more than one silent frame — i.e. almost every
