@@ -4,6 +4,33 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.12.0 — Fix broken .mov export; much tighter caption strip
+- **Fixed: the one-click `.mov` export failed** ("ArrayBuffer is already
+  detached") on any clip with more than one silent frame — i.e. almost every
+  clip. Cause: v1.11.0's blank-frame reuse cached PNG bytes, but the ffmpeg
+  worker *transfers* (detaches) the buffer it's handed, so the cached bytes
+  died on their first use and the next silent frame crashed the export. Reused
+  bytes are now copied before being handed to the encoder.
+- **The caption strip is now sized to the caption, not a worst case.** The
+  band's padding previously always reserved ≥120 px of animation headroom
+  (even with animation off) plus 40% of the caption height. It now measures
+  the *selected* animation's real vertical travel (zero for None / Fade /
+  Wipe / Typewriter / Color Flash), counts box padding only when the box is
+  visible, and uses a small glyph-overflow margin — on the sample at 1080p the
+  strip shrank from 374 px to ~250 px tall, and captions without animation get
+  the biggest win. Fewer pixels = proportionally faster PNG encode + smaller
+  files.
+- **Static captions are encoded once per cue.** With no intro animation and no
+  word-by-word color (karaoke / active-word pill), every frame of a caption's
+  hold is identical — the PNG is now encoded once and reused for the whole
+  hold, the same way silent gaps already reuse one blank frame. Segment-only
+  transcripts (SRT/VTT) with animation off export dramatically faster.
+- **Cue lookup during export is O(1) per frame** (monotonic pointer) instead
+  of scanning the whole cue list every frame — noticeable on long transcripts
+  (the scan was frames × cues).
+- Both video exporters now share one frame-render loop (`renderExportFrames`),
+  so future fixes apply to the PNG sequence and the `.mov` equally.
+
 ## v1.11.0 — Caption-band export (much faster on long clips)
 - **Crop to caption band** (Export tab, on by default): the transparent PNG
   sequence and one-click `.mov` now render only the horizontal **strip** the

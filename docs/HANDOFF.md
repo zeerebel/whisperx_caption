@@ -19,11 +19,14 @@ use. That's why it's free.
   confirm which build is live.
 
 ## Current version state
-- **Live on main: v1.10.2** (v1.9.4/1.9.5 backdrop + mobile fixes, and the
-  v1.10.x in-app Guide tab / Export-tab styling all merged).
-- **In progress: v1.11.0** on branch `claude/whisperx-json-handoff-2bbumm` —
-  the **caption-band ("strip") export** that makes long-clip exports far faster
-  (see "Performance: caption-band export" below). Merge that PR to ship it.
+- **Live on main: v1.11.0** (caption-band export merged via PR #25).
+- **In progress: v1.12.0** on branch `claude/export-caption-sizing-e85vyx` —
+  fixes the `.mov` export v1.11.0 broke (ffmpeg's writeFile *transfers/detaches*
+  the buffer, so the cached blank-frame bytes died on first use → "ArrayBuffer
+  is already detached" on every clip with silence), sizes the strip to the
+  caption + the selected animation's real travel instead of a ≥120 px worst
+  case, reuses one encode per static caption hold, and makes per-frame cue
+  lookup O(1). Both video exporters now share `renderExportFrames`.
 - Full history in `CHANGELOG.md`.
 
 ## Performance: caption-band export (v1.11.0) — why long exports were slow
@@ -139,13 +142,12 @@ Notes:
   1280, and assert exports/edits. Re-create as needed.
 
 ## Open threads
-1. **Merge the v1.11.0 caption-band PR** (branch
-   `claude/whisperx-json-handoff-2bbumm`) to ship the faster export.
-2. **Further export speedups if still needed:** the band + empty-frame reuse are
-   the first pass. Next levers (not done): reuse bytes for *static* caption holds
-   too (safe only when no animation/karaoke is moving that frame), a Web Worker /
-   OffscreenCanvas encode so the tab stays responsive, and letting the user trim
-   the export time range.
+1. **Merge the v1.12.0 PR** (branch `claude/export-caption-sizing-e85vyx`) —
+   without it the one-click `.mov` export on main is broken.
+2. **Further export speedups if still needed:** band, blank-gap reuse and
+   static-hold reuse are done. Next levers (not done): a Web Worker /
+   OffscreenCanvas encode so the tab stays responsive, and letting the user
+   trim the export time range.
 3. **Premium Cloud Transcribe** — full plan in `docs/PREMIUM_PLAN.md`. User has
    Supabase + Stripe already; recommended GPU = Replicate; API glue = a
    Cloudflare Worker; validate with a waitlist button before building billing.
