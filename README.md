@@ -144,8 +144,16 @@ node tools/render_export.mjs my-conversation.json --mov prores
 #    my-conversation_1920x1080_30fps_overlay.mov  (alpha ProRes 4444)
 ```
 
-`--style my-look.json` applies a saved look (same control ids the app's presets
-use), `--res` / `--fps` / `--no-crop` mirror the Export tab, `--out` picks the
+**Getting your look into it:** style the caption in the app as normal — font,
+color, animation, position, all of it — then hit **⬇ Style settings (.json)**
+at the bottom of the Export tab. That downloads exactly what you built, in the
+shape `--style` expects:
+
+```bash
+node tools/render_export.mjs my-conversation.json --style my-conversation.style.json --mov prores
+```
+
+`--res` / `--fps` / `--no-crop` mirror the Export tab, `--out` picks the
 output folder; live progress + ETA prints in the terminal. No audio file
 needed. If ffmpeg isn't installed the run still succeeds — the frames are the
 deliverable, and the tool prints the exact mux command to run later. See

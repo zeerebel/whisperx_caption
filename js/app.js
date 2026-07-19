@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.12.3";
+  const APP_VERSION = "1.12.4";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -538,7 +538,7 @@
   }
   function baseName() { return (state.baseName || "captions").replace(/\.[^.]+$/, ""); }
   function setExportEnabled(on) {
-    ["dlSrt", "dlVtt", "dlAss", "dlJson", "copyFfmpeg", "playBtn", "scrubber",
+    ["dlSrt", "dlVtt", "dlAss", "dlJson", "dlStyleJson", "copyFfmpeg", "playBtn", "scrubber",
      "dlPngSeq", "dlPngFrame", "dlWebm", "dlMov"].forEach((id) => ($(id).disabled = !on));
   }
   function setExportBusy(b) {
@@ -1469,6 +1469,10 @@
     $("dlVtt").addEventListener("click", () => download(baseName() + ".vtt", WXC.formats.toVTT(state.cues, $("optExportKaraoke").checked), "text/vtt"));
     $("dlAss").addEventListener("click", () => download(baseName() + ".ass", WXC.formats.toASS(state.cues, readAssStyle(), { karaoke: $("optExportKaraoke").checked })));
     $("dlJson").addEventListener("click", () => download(baseName() + ".captions.json", WXC.formats.toJSON(state.cues, readAssStyle())));
+    // Same shape captureStyle() already uses for presets/autosave (control ids
+    // -> values) — that's exactly what tools/render_export.mjs --style expects,
+    // so this file works with the CLI with no conversion step.
+    $("dlStyleJson").addEventListener("click", () => download(baseName() + ".style.json", JSON.stringify(captureStyle(), null, 2), "application/json;charset=utf-8"));
     $("copyFfmpeg").addEventListener("click", copyFfmpeg);
     $("exportCancel").addEventListener("click", () => {
       exportCancelled = true;

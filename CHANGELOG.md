@@ -4,6 +4,17 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.12.4 — Style hand-off to the local CLI tool
+- **Added: ⬇ Style settings (.json)** button at the bottom of the Export tab.
+  Downloads the exact look you built in the app — font, colors, animation,
+  position, everything — in the shape `tools/render_export.mjs --style`
+  expects. Closes the gap between "design it in the browser" and "render it
+  locally": before this, there was no way to hand your styling off to the CLI
+  tool without manually digging the settings out of browser storage. Verified
+  end-to-end: applied a preset through the real UI, downloaded the file,
+  fed it into the CLI cold (no browser state), confirmed the rendered output
+  reflects the exact style (pixel-level check on the box/animation).
+
 ## v1.12.3 — Live export ETA
 - **Added: a self-calibrating time estimate during export.** Rather than a
   hardcoded guess (actual speed varies enormously by machine, resolution,

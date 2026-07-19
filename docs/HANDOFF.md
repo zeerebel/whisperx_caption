@@ -32,6 +32,19 @@ overrides visibly changing output, and a real qtrle `.mov` mux (ffprobe
 confirms `argb`/1920×232) — see the session transcript for the full test
 matrix, including error-path coverage (missing/invalid transcript, bad
 `--style`/`--res`/`--fps`, ffmpeg absent vs. present-but-broken).
+- **v1.12.4 closed a real gap**: there was no way to get a style you designed
+  in the browser INTO the CLI tool without manually pulling `wxc.style` out of
+  localStorage — confusing, undiscoverable. Added **⬇ Style settings (.json)**
+  at the bottom of the Export tab (`#dlStyleJson` in `index.html`/`js/app.js`)
+  — downloads `captureStyle()`'s output (the same control-id shape presets and
+  autosave already use), which is exactly the shape `--style` expects, so
+  there's no conversion step. Verified with a true end-to-end loop: applied
+  the "Boxed Subtitle" preset through the real `#presetSelect` dropdown (not
+  by poking hidden fields), downloaded the file via the real button, then ran
+  the CLI cold (fresh headless page, zero browser state carried over) with
+  only that file — the rendered frame showed 62,195 semi-transparent box-alpha
+  pixels vs. ~4,500 in an unstyled bake, proving the hand-off actually
+  round-trips through a file, not through shared app state.
 
 ## Deploy / hosting (important)
 - Live site: **https://whisperxcaption.fusionmma.workers.dev** (Cloudflare
@@ -43,9 +56,10 @@ matrix, including error-path coverage (missing/invalid transcript, bad
   confirm which build is live.
 
 ## Current version state
-- **Live on main: v1.12.3** (PR #27→v1.12.0, #28→v1.12.1, #31→v1.12.2, all
-  merged) — v1.12.1's live-ness confirmed via a clean Cloudflare deploy log
-  (see "Deploy pipeline was silently landing stale builds" below).
+- **Live on main: v1.12.4** (#27→v1.12.0, #28→v1.12.1, #31→v1.12.2, #32→v1.12.3,
+  #33→CLI tool, →v1.12.4, all merged) — v1.12.1's live-ness confirmed via a
+  clean Cloudflare deploy log (see "Deploy pipeline was silently landing
+  stale builds" below).
 - **v1.12.3 — live export ETA, plus measured throughput numbers.** The app's
   owner reported a real 42-minute export left running 10 hours with no
   feedback on whether it was working. Rather than guess, I benchmarked actual
