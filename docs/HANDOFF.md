@@ -19,9 +19,48 @@ use. That's why it's free.
   confirm which build is live.
 
 ## Current version state
-- **Live on main: v1.12.2** (PR #27→v1.12.0, #28→v1.12.1, #31→v1.12.2, all
+- **Live on main: v1.12.3** (PR #27→v1.12.0, #28→v1.12.1, #31→v1.12.2, all
   merged) — v1.12.1's live-ness confirmed via a clean Cloudflare deploy log
   (see "Deploy pipeline was silently landing stale builds" below).
+- **v1.12.3 — live export ETA, plus measured throughput numbers.** The app's
+  owner reported a real 42-minute export left running 10 hours with no
+  feedback on whether it was working. Rather than guess, I benchmarked actual
+  throughput against the live code using the headless-Chromium harness
+  (`scratchpad/e2e/bench_speed.mjs` — steady-state fps, skipping first-frame
+  setup overhead) at 1080p with crop-band on:
+  | path | measured rate | 10 min clip | 42 min clip | 60 min clip |
+  |---|---|---|---|---|
+  | PNG sequence | ~130–160 fps | ~1.5–1.8 min | ~6–8 min | ~9–11 min |
+  | `.mov` Animation/qtrle | ~30 fps | ~8 min | ~33 min | ~48 min |
+  | `.mov` ProRes 4444 | ~17 fps | ~14 min | ~61 min | ~87 min |
+
+  These are headless-CI numbers (a floor, not a ceiling — real hardware
+  varies) and assume **crop-band is on**; crop off multiplies everything by
+  roughly `full-frame-height / band-height` (often 3–5×). They do NOT include
+  background-tab throttling, which was the likely actual cause of the
+  10-hour report (see v1.12.1 above) — ProRes at full-frame height, in a
+  backgrounded tab, on a 42-minute clip is entirely capable of that.
+
+  **Practical guidance from these numbers:** the PNG sequence is fast enough
+  that duration is rarely the bottleneck (even 60 min is single-digit
+  minutes) — steer long clips there over `.mov`. `.mov` Animation/qtrle is
+  fine up to ~20-30 min. ProRes 4444 gets expensive fast; it's really meant
+  for short clips or for muxing from the PNG sequence via "Copy ffmpeg
+  command" (external, real ffmpeg, not the in-browser wasm core) rather than
+  the one-click button for anything past a few minutes. There's no hardcoded
+  cap in the app (a hard duration limit would block legitimate long PNG-seq
+  exports that are actually fast) — instead:
+  - **Added: a live, self-calibrating ETA** in the progress line for both
+    export phases (`— ~Xm Ys left`, recalculated continuously from the real
+    device's own measured rate, not a hardcoded guess). A stall now shows up
+    as a ballooning number within seconds instead of hours of silence, so the
+    user can cancel instead of waiting blind. Verified empirically
+    (`scratchpad/e2e/test9_eta.mjs`): observed `"...— ~20s left"` mid-encode,
+    confirmed absent from the final success line.
+  - **Not done, still the real fix for the reported case specifically:**
+    open thread #3 (below) — letting the user trim the export to a time
+    range — would let someone export just the 2-3 minutes they actually need
+    from a 42-minute source instead of the whole thing.
 - **v1.12.2 — multi-model audit fixes.** A workflow fanned out 5 independent
   static finders across models (Fable/max on export + crop-band geometry,
   Sonnet on parse/formats + the zip writer, Haiku on markup/id wiring) plus

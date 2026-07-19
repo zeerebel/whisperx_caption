@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.12.2";
+  const APP_VERSION = "1.12.3";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -650,6 +650,25 @@
   }
 
   // Shared frame walk for the PNG-sequence and .mov exports: renders each frame
+  // A static hardcoded "this will take N minutes" is a guess — actual speed
+  // varies wildly by machine, resolution, codec, and animation. Instead each
+  // export phase times itself against the real device and reports a
+  // continuously-recalibrated estimate, so a stall (background-tab throttling,
+  // a slow codec, a huge clip) shows up as a ballooning ETA within seconds —
+  // letting the user cancel instead of finding out after hours of silence.
+  function etaText(startT, done, total) {
+    if (done <= 0) return "";
+    const elapsedSec = (performance.now() - startT) / 1000;
+    if (elapsedSec < 1.5 && done < 15) return ""; // too few samples to trust yet
+    const rate = done / elapsedSec;
+    if (!(rate > 0)) return "";
+    const remainingSec = (total - done) / rate;
+    if (remainingSec < 5) return "";
+    const m = Math.floor(remainingSec / 60), h = Math.floor(m / 60);
+    const left = h > 0 ? `${h}h ${m % 60}m` : m > 0 ? `${m}m ${Math.round(remainingSec % 60)}s` : `${Math.round(remainingSec)}s`;
+    return ` — ~${left} left`;
+  }
+
   // (cropped to the band when given), encodes it to PNG bytes and hands
   // (name, bytes, cached) to sink in order. Two reuse caches keep long clips
   // cheap: ONE blank frame serves every silent gap, and a caption that nothing
@@ -683,6 +702,7 @@
     // live in the foreground while cutting the number of clamp-exposed timers
     // by orders of magnitude.
     let lastYield = performance.now();
+    const renderStartT = lastYield;
     try {
       for (let i = 0; i < frameCount; i++) {
         checkCancel();
@@ -704,7 +724,7 @@
         await sink(name, bytes, bytes === emptyBytes || bytes === holdBytes);
         if (performance.now() - lastYield > 60) {
           // Don't clobber the hidden-tab warning while backgrounded.
-          if (!document.hidden) $("exportProgress").textContent = `Rendering frame ${i + 1} / ${frameCount}…`;
+          if (!document.hidden) $("exportProgress").textContent = `Rendering frame ${i + 1} / ${frameCount}…${etaText(renderStartT, i + 1, frameCount)}`;
           await new Promise((r) => setTimeout(r, 0));
           lastYield = performance.now();
         }
@@ -1057,7 +1077,12 @@
       const stallTimer = setTimeout(killEncoder, timeoutMs);
       // ffmpeg reports "frame=N" as it encodes — mirror it so a multi-second
       // (or multi-minute) encode shows progress instead of looking frozen.
-      onFfFrame = (n) => { if (!terminated) $("exportProgress").textContent = `Encoding transparent .mov — frame ${Math.min(n, frameCount)} / ${frameCount} (${codec.label})…`; };
+      const encodeStartT = performance.now();
+      onFfFrame = (n) => {
+        if (terminated) return;
+        const done = Math.min(n, frameCount);
+        $("exportProgress").textContent = `Encoding transparent .mov — frame ${done} / ${frameCount} (${codec.label})…${etaText(encodeStartT, done, frameCount)}`;
+      };
       try {
         await ff.exec(["-framerate", String(fps), "-i", "cap_%05d.png", ...codec.args, "out.mov"]);
       } catch (e) {
