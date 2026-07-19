@@ -128,7 +128,7 @@ Format: Layer, Start, End, Style, MarginL, MarginR, MarginV, Effect, Text
       } else {
         text = escapeASS(c.text);
       }
-      return `Dialogue: 0,${assTime(c.start)},${assTime(c.end)},Caption,,0,0,0,,${text}`;
+      return `Dialogue: 0,${assTime(c.start)},${assTime(c.end)},Caption,0,0,0,,${text}`;
     });
     return header + lines.join("\n") + "\n";
   }

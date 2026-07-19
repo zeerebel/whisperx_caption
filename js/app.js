@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.12.1";
+  const APP_VERSION = "1.12.2";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -581,8 +581,9 @@
   // Mirrors the displacements in render.js lineTransform/wordTransform; the
   // ids not listed (none, fade-in, wipe-reveal, typewriter, color-flash) move
   // nothing vertically and need zero.
-  function animHeadroom(anim, fontPx, blockH, scale) {
+  function animHeadroom(anim, fontPx, blockH, scale, boxPadPx) {
     const k = Math.max(anim && anim.intensity != null ? anim.intensity : 1, 0);
+    const bp = boxPadPx || 0; // the box (if any) scales around the block center too — see zoom-in/bounce-in
     switch (anim && anim.id) {
       case "slide-up": case "slide-down": return fontPx * 1.1 * k;
       case "drop-in-gravity": return 90 * k * scale;
@@ -591,8 +592,8 @@
       case "shake": return 7 * k * scale;
       case "wave": return 8 * k * scale;
       case "word-fade-cascade": return 9 * k * scale;
-      case "zoom-in": return blockH * 0.3 * k;            // starts at scale 1 + 0.6k
-      case "bounce-in": return blockH * 0.2;              // outElastic overshoots to ~1.37
+      case "zoom-in": return blockH * 0.3 * k + bp * 0.6 * k;   // starts at scale 1 + 0.6k
+      case "bounce-in": return blockH * 0.2 + bp * 0.374;       // outElastic overshoots to ~1.374
       case "pop-scale-in": return blockH * 0.06;          // outBack overshoot ≈ 1.1
       case "word-pop-in": return fontPx * 0.1;            // per-word outBack overshoot
       default: return 0;
@@ -626,11 +627,12 @@
     // shadow (blur + offset), the animation's real travel, and a glyph-overflow
     // margin (ascenders/descenders/diacritics past the em box, the active-word
     // pill) — sized to the caption instead of a worst-case constant.
+    const boxPadPx = style.boxOpacity > 0.02 ? style.boxPad * scale : 0;
     const pad =
-      (style.boxOpacity > 0.02 ? style.boxPad * scale : 0) +
+      boxPadPx +
       style.outline * scale * 2 +
       style.shadow * scale * 2 +
-      animHeadroom(anim, fontPx, blockH, scale) +
+      animHeadroom(anim, fontPx, blockH, scale, boxPadPx) +
       fontPx * 0.35 +
       8 * scale;
     let top = Math.floor(minY - pad);
@@ -719,6 +721,15 @@
     const frameCount = Math.max(1, Math.round(state.duration * fps));
     const zipName = `${baseName()}_${w}x${h}_${fps}fps_png.zip`;
 
+    // ZIP entry count is a 16-bit field (store-only-zip.js MAX_ENTRIES = 65535)
+    // and every export also appends a README.txt entry — check the +1 up front
+    // so a multi-minute render can't complete and then be discarded because the
+    // frame count alone already used the whole budget.
+    if (frameCount + 1 > 0xffff) {
+      alert(`${frameCount} frames at ${fps}fps is too many for one .zip (limit ${0xffff - 1} frames).\n\nLower the fps/resolution or trim the audio for a shorter clip.`);
+      return;
+    }
+
     // Stream the zip straight to disk when the browser allows it (Chrome/Edge):
     // frames leave memory as soon as they're written, so peak memory stays flat
     // no matter how long or high-res the clip is.
@@ -732,7 +743,7 @@
         });
         writable = await fh.createWritable();
       } catch (e) {
-        if (e && e.name === "AbortError") return; // user closed the save dialog
+        if (e && e.name === "AbortError") { $("exportProgress").textContent = ""; return; } // user closed the save dialog
         writable = null; // picker unavailable → fall back to the in-memory path
       }
     }
@@ -1064,8 +1075,12 @@
       if (!data || !data.length) {
         // The encoder wrote nothing — on this single-threaded wasm core that's
         // almost always an out-of-memory abort on a long/high-res clip. The
-        // aborted core is unusable, so drop it and reload fresh next time.
+        // aborted core is unusable, so drop it and reload fresh next time —
+        // terminate() frees the worker's wasm heap and every written frame
+        // instead of leaking them (a retry would otherwise pile a second
+        // worker's memory on top of the abandoned one).
         ffmpegInstance = null;
+        try { ff.terminate(); } catch (err) {}
         const oom = ffLogRing.some((l) => /out of memory|cannot enlarge|memory access|abort|killed|malloc|bad_alloc/i.test(l));
         throw new Error(oom
           ? "the in-browser encoder ran out of memory at this size. Lower the resolution/FPS or shorten the clip — or export the PNG sequence and use “Copy ffmpeg command” for a ProRes .mov."
@@ -1083,7 +1098,12 @@
     } catch (e) {
       if (e === CANCEL) reportExportError(e, "");
       else {
-        ffmpegInstance = null; // a failed/aborted core can't be trusted — reload on next try
+        // A failed/aborted core can't be trusted — drop it and terminate the
+        // worker so its wasm heap + every written frame isn't leaked (this
+        // error message invites a retry, which would otherwise build a new
+        // worker on top of the abandoned one's still-resident memory).
+        ffmpegInstance = null;
+        try { ff.terminate(); } catch (err) {}
         $("exportProgress").textContent = "⚠️ .mov export failed: " + e.message;
         toast("⚠️ .mov export failed");
       }
