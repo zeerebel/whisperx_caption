@@ -126,6 +126,9 @@ its own — set the frame rate at import).
 
 #### Long clip? Render it locally instead — no browser tab to babysit
 
+**New to this? [`docs/LOCAL_CLI_GUIDE.md`](docs/LOCAL_CLI_GUIDE.md) walks through
+every step from a blank folder, plain-language, no assumed knowledge.**
+
 The same export, run headlessly on your own machine: `tools/render_export.mjs`
 boots the real app in headless Chromium (the identical rendering code, so the
 frames are pixel-for-pixel the same), saves **and unzips** the PNG sequence for
