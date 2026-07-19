@@ -30,6 +30,7 @@
 //
 // Setup (once):  npm install   then   npx playwright install chromium
 // No audio file is needed — the transcript alone sets the export duration.
+// New to this? Full step-by-step walkthrough: docs/LOCAL_CLI_GUIDE.md
 
 import fs from "node:fs";
 import http from "node:http";
@@ -57,7 +58,7 @@ const MOV_CODECS = {
 function usage() {
   const src = fs.readFileSync(fileURLToPath(import.meta.url), "utf8");
   // The comment block at the top of this file IS the help text.
-  console.log(src.split("\n").slice(1, 33).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+  console.log(src.split("\n").slice(1, 34).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
 }
 
 // ---------- argument parsing ----------
