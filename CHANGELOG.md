@@ -4,6 +4,20 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.12.3 — Live export ETA
+- **Added: a self-calibrating time estimate during export.** Rather than a
+  hardcoded guess (actual speed varies enormously by machine, resolution,
+  codec, and animation), each export phase times itself against the real
+  device from the first ~15 frames / 1.5s onward and appends `— ~Xm Ys left`
+  to the progress line, continuously recalculated from actual measured
+  throughput. A stall — a slow codec, a huge clip, a backgrounded tab getting
+  throttled — now shows up as a ballooning ETA within seconds instead of
+  silence for hours. Applies to both the PNG-sequence render loop and the
+  `.mov` ffmpeg encode phase; the ETA text never appears on the final success
+  line. Motivated by a real report of a 42-minute export left running for 10
+  hours with no way to tell if it was working — see `docs/HANDOFF.md` for the
+  measured throughput numbers behind this and codec/duration guidance.
+
 ## v1.12.2 — Multi-model audit fixes
 Found by a fanned-out audit (five independent finders across different models,
 each finding adversarially cross-checked, plus a headless-browser agent that
