@@ -9,6 +9,30 @@ overlay** (PNG sequence or alpha `.mov`) plus SRT/VTT/ASS/JSON. All processing
 (parse, render, encode) runs in the visitor's browser — no backend, no cost per
 use. That's why it's free.
 
+## Local rendering CLI (`tools/render_export.mjs`) — not part of the deployed app
+Added 2026-07-19 for the owner's own use as a faster/free alternative to Opus
+Pro — not a hosted feature, doesn't touch `main`'s deployed behavior. Drives
+the *same* rendering code as the browser (headless Chromium via Playwright,
+served by a tiny built-in Node http server — no python needed), then
+optionally muxes with the user's **native** ffmpeg instead of ffmpeg.wasm.
+Two structural wins over the in-browser one-click export: a script-driven
+headless page is never a backgroundable tab (the throttling behind the
+10-hour stall story above literally cannot apply), and native ffmpeg is
+10-50x faster than the wasm build. `npm install && npx playwright install
+chromium` once, then `node tools/render_export.mjs <transcript.json>
+[--style x.json] [--res WxH] [--fps N] [--no-crop] [--mov qtrle|prores]`.
+Extracts the PNG sequence to a `_frames/` folder automatically; missing/broken
+local ffmpeg degrades gracefully (prints the manual command, still exits 0 —
+the PNG sequence alone is a complete deliverable). `package.json` /
+`package-lock.json` at the repo root are for this tool only — `.assetsignore`
+already excludes them (and `node_modules/`, gitignored) from the Cloudflare
+deploy, confirmed. Verified end-to-end against `sample/sample.whisperx.json`:
+correct crop-band dimensions, gap-free frame numbering, valid zip, style
+overrides visibly changing output, and a real qtrle `.mov` mux (ffprobe
+confirms `argb`/1920×232) — see the session transcript for the full test
+matrix, including error-path coverage (missing/invalid transcript, bad
+`--style`/`--res`/`--fps`, ffmpeg absent vs. present-but-broken).
+
 ## Deploy / hosting (important)
 - Live site: **https://whisperxcaption.fusionmma.workers.dev** (Cloudflare
   Workers, static assets).

@@ -1,0 +1,12 @@
+{
+  "name": "whisperx-caption-studio",
+  "private": true,
+  "description": "Dependencies for the local CLI tools only (tools/render_export.mjs). The web app itself is plain static files with no build step; .assetsignore keeps package.json / node_modules out of the deployed site.",
+  "scripts": {
+    "render": "node tools/render_export.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.56.1",
+    "yauzl": "3.2.0"
+  }
+}
