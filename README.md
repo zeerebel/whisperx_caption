@@ -124,6 +124,33 @@ its own — set the frame rate at import).
 > above) is the real, editor-compatible alpha path. The `.webm` button here is
 > the *opaque* recorder for the chroma-key workflow only.
 
+#### Long clip? Render it locally instead — no browser tab to babysit
+
+The same export, run headlessly on your own machine: `tools/render_export.mjs`
+boots the real app in headless Chromium (the identical rendering code, so the
+frames are pixel-for-pixel the same), saves **and unzips** the PNG sequence for
+you, and can mux the `.mov` with your **native** ffmpeg. Two things make it the
+better choice for anything longer than a few minutes: a script-driven headless
+page is never a background tab (so the browser's hidden-tab throttling can't
+stall the render), and native ffmpeg encodes far faster than the in-browser
+encoder. No hosting, no upload — it's the local-pipeline sibling of
+`tools/transcribe_whisperx.py`.
+
+```bash
+npm install && npx playwright install chromium    # setup, once
+node tools/render_export.mjs my-conversation.json --mov prores
+# -> my-conversation_1920x1080_30fps_png.zip  (kept, README.txt inside)
+#    my-conversation_1920x1080_30fps_frames/  (extracted, import-ready)
+#    my-conversation_1920x1080_30fps_overlay.mov  (alpha ProRes 4444)
+```
+
+`--style my-look.json` applies a saved look (same control ids the app's presets
+use), `--res` / `--fps` / `--no-crop` mirror the Export tab, `--out` picks the
+output folder; live progress + ETA prints in the terminal. No audio file
+needed. If ffmpeg isn't installed the run still succeeds — the frames are the
+deliverable, and the tool prints the exact mux command to run later. See
+`node tools/render_export.mjs --help`.
+
 **Burn the styled caption file onto a video** instead (the *Copy ffmpeg command*
 button fills these in too):
 
