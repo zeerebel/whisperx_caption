@@ -4,6 +4,42 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.12.2 — Multi-model audit fixes
+Found by a fanned-out audit (five independent finders across different models,
+each finding adversarially cross-checked, plus a headless-browser agent that
+drove the real app and validated behavior empirically — see `docs/HANDOFF.md`
+for the full breakdown).
+- **Fixed: every `.ass` export had a stray extra field**, shifting the caption
+  text one column out of alignment with a literal leading comma on every line
+  (`Dialogue: 0,start,end,Caption,,0,0,0,,text` had one comma too many vs. the
+  declared 9-field `[Events] Format` — libass and any compliant parser read
+  the text as `,Hello world` instead of `Hello world`). This is the app's
+  flagship styled export format; it was broken on 100% of `.ass` exports.
+- **Fixed: a PNG-sequence export could finish a multi-minute render and then
+  discard the whole thing.** The zip writer's entry-count cap (65,535, a
+  16-bit field) counts the README.txt entry the exporter always appends, but
+  nothing checked `frameCount + 1` against that cap before rendering — so a
+  clip landing at exactly 65,535 frames (~36 min at 30fps) would render
+  completely, stream every frame to disk, and only then throw on the README
+  add, discarding the finished file. Now checked up front, before any
+  rendering starts.
+- **Fixed: a boxed caption with a scale-up animation (Zoom In, Bounce In) at
+  high intensity could clip against the crop-band edge.** `computeCaptionBand`
+  reserved headroom for the *text block's* animation growth but not for the
+  *box padding's* growth — the box scales around the same center as the text,
+  so at max zoom/bounce the box edge could poke past the band boundary the pad
+  was supposed to guarantee. Fixed by scaling the reserved headroom with the
+  effective box padding, not just the block height.
+- **Fixed: a failed/OOM `.mov` encode leaked the ffmpeg.wasm worker.** On
+  encode failure the code dropped its reference to the worker without calling
+  `ff.terminate()`, so the wasm heap and every already-written frame stayed
+  resident — and the error message inviting a retry meant each failed attempt
+  stacked another leaked worker on top, making the next attempt's OOM more
+  likely. Both failure paths now terminate the worker before dropping it.
+- **Fixed: cancelling the PNG-sequence save-file dialog left the status line
+  stuck** on "Choose where to save the .zip…" indefinitely (every other cancel
+  path in the app clears its status; this one didn't).
+
 ## v1.12.1 — Background-tab export stalls; crop feedback
 - **Fixed: an export left in a background tab could take hours** (a real one
   ran 10+ hours without finishing). The frame loop yielded to the browser

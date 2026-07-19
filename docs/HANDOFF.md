@@ -1,6 +1,6 @@
 # Handoff — WhisperX Caption Studio
 
-Snapshot to continue in a fresh session/thread. Written 2026-07-07, last updated 2026-07-18.
+Snapshot to continue in a fresh session/thread. Written 2026-07-07, last updated 2026-07-19.
 
 ## What the app is
 A 100%-client-side web app that turns a WhisperX transcript (`.json` / `.srt` /
@@ -19,9 +19,42 @@ use. That's why it's free.
   confirm which build is live.
 
 ## Current version state
-- **Live on main: v1.12.1** (PR #27 → v1.12.0, PR #28 → v1.12.1, both merged
-  2026-07-18) — confirmed actually serving live via a clean Cloudflare deploy
-  log (see "Deploy pipeline was silently landing stale builds" below).
+- **Live on main: v1.12.2** (PR #27→v1.12.0, #28→v1.12.1, #31→v1.12.2, all
+  merged) — v1.12.1's live-ness confirmed via a clean Cloudflare deploy log
+  (see "Deploy pipeline was silently landing stale builds" below).
+- **v1.12.2 — multi-model audit fixes.** A workflow fanned out 5 independent
+  static finders across models (Fable/max on export + crop-band geometry,
+  Sonnet on parse/formats + the zip writer, Haiku on markup/id wiring) plus
+  one Fable agent that built a headless-Chromium harness and drove the *real*
+  app end-to-end — every finding adversarially cross-checked by Opus. Result:
+  5 confirmed, 1 refuted, 0 disputed; the e2e agent found zero bugs itself but
+  empirically validated 10 v1.12.0/v1.12.1 claims (crop dimensions, band
+  bounds under max-intensity animations, the hidden-tab warning, a real `.mov`
+  encode, zip integrity) that had only ever been verified by code review
+  before. Fixed: the `.ass` export's stray-comma field misalignment (100% of
+  lines, flagship format — see CHANGELOG), the zip README-entry-vs-65535-cap
+  off-by-one that could discard a fully-rendered long export, box-padding not
+  scaling correctly in the crop-band headroom for zoom-in/bounce-in, a leaked
+  ffmpeg.wasm worker on failed `.mov` encodes, and a stuck status line on
+  save-dialog cancel. Full detail + reasoning for each in CHANGELOG.md v1.12.2
+  and in this session's transcript.
+  - **A 6th issue was found but NOT fixed — flagged for a follow-up
+    session.** Writing a regression test for the box-padding fix above (push
+    box pad + a scale animation to their sliders' maxes) reproduced clipping
+    at BOTH the crop-band edge (now fixed) AND the physical bottom edge of the
+    frame itself — the latter happens with crop OFF too, so it isn't a
+    crop-band bug at all. Root cause: `layout()` in `render.js` positions a
+    bottom-aligned block at `H - marginYpx - blockHeight` with zero reserve
+    for scale-animation/box growth; that growth is applied later purely as a
+    `ctx.scale()` transform around the block's center in `drawCaption`, which
+    `layout()` has no visibility into. Fixing it properly means threading
+    `anim` into `layout()`'s position math (today it only takes `style`) so
+    the resting Y shifts up when a scale animation + box would otherwise
+    overflow the frame — a change to the shared preview+export positioning
+    function, so it needs its own deliberate pass rather than folding into
+    this fix batch. Reproduces only at extreme combined settings (box pad
+    near 80/80 max + Zoom In or Bounce In at intensity 2/2 max); default
+    margins (10%) are not enough headroom against that combination.
 - **v1.12.0** (PR #27) fixed the `.mov` export that v1.11.0 had broken for
   almost every clip (ffmpeg's `writeFile` *transfers/detaches* the buffer, so
   the cached blank-frame bytes died on first reuse → "ArrayBuffer is already
@@ -210,7 +243,18 @@ Notes:
   "Deploy pipeline was silently landing stale builds" above.
 
 ## Open threads
-1. **The real fix for background-tab stalls: move frame-render + PNG-encode
+1. **Bottom-frame-edge clipping for boxed captions + scale animations at
+   extreme settings** (found this session, not fixed — see "v1.12.2" above for
+   full root cause). Reproduce: box pad ~80 + Zoom In or Bounce In at
+   intensity 2, vAlign bottom. Fix requires threading `anim` into
+   `render.js`'s `layout()` so the resting position reserves room for the
+   scale/box growth, same idea as `animHeadroom()` but applied to *position*
+   instead of *crop-band size* — touches the shared preview+export function,
+   do this deliberately with its own regression tests (a reusable one exists:
+   `scratchpad/e2e/test8_box_zoom.mjs` from this session, if the scratchpad
+   survived — otherwise recreate: box pad 80, boxOpacity 0.55, zoom-in
+   intensity 2, crop ON, `check_edges.py` on the resulting zip).
+2. **The real fix for background-tab stalls: move frame-render + PNG-encode
    into a Web Worker + OffscreenCanvas.** v1.12.1's wall-time yield + hidden-tab
    warning are mitigations (fewer clamp-exposed timers, and telling the user
    why it's slow) — they don't eliminate the throttling, they reduce exposure
@@ -219,23 +263,23 @@ Notes:
    deserves its own session; the ffmpeg encode itself already runs in a
    Worker, only the canvas render + PNG encode (`renderExportFrames`) is on
    the main thread today.
-2. **Let the user trim the export time range.** Probably the single biggest
+3. **Let the user trim the export time range.** Probably the single biggest
    lever for "exports take too long" generically — most exports don't need
    the full clip, and a shorter range beats optimizing the encode of frames
    nobody wants. Not built yet.
-3. **Screen Wake Lock during export** (`navigator.wakeLock`) — a different
+4. **Screen Wake Lock during export** (`navigator.wakeLock`) — a different
    failure mode than tab-backgrounding: if the laptop screen locks/sleeps,
    JS execution pauses entirely until manually woken, which would also
    explain an export that "ran overnight and never finished." Cheap to add,
    not done.
-4. **ProRes 4444 is known-slow/OOM-prone in-browser** (see Gotchas above) —
+5. **ProRes 4444 is known-slow/OOM-prone in-browser** (see Gotchas above) —
    worth a stronger nudge toward qtrle (already the default) or the PNG
    sequence + external `ffmpeg` command for anyone who picks it anyway.
-5. **In-memory PNG-sequence fallback can OOM on long exports** in browsers
+6. **In-memory PNG-sequence fallback can OOM on long exports** in browsers
    without the File System Access API (Firefox, Safari) — the
    streaming-straight-to-disk path (`showSaveFilePicker`) only exists on
    Chromium. Not addressed.
-6. **Premium Cloud Transcribe** — full plan in `docs/PREMIUM_PLAN.md`, and a
+7. **Premium Cloud Transcribe** — full plan in `docs/PREMIUM_PLAN.md`, and a
    draft implementation exists in (closed, unmerged) PR #23 — Cloudflare
    Worker + Replicate WhisperX + a "Cloud Transcribe" panel, fully inert
    until `REPLICATE_API_TOKEN`/`TRANSCRIBE_PASSPHRASE` secrets are set. User
