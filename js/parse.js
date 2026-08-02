@@ -11,7 +11,15 @@
 (function () {
   const WXC = (window.WXC = window.WXC || {});
 
-  const num = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
+  // A non-numeric, non-empty field (e.g. a malformed "N/A" timestamp) must
+  // also come out as "missing", not NaN — NaN survives every downstream
+  // null-check (`!= null`, `?? 0`), silently corrupting interpolation, the
+  // renderer's cue-visibility check, and every exported timestamp field.
+  const num = (v) => {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isNaN(n) ? null : n;
+  };
 
   // ---- JSON: WhisperX, OpenAI verbose_json, WhisperX word_segments, Amoeba sidecar
   function fromJSON(data) {
@@ -31,7 +39,13 @@
           for (const w of ws) pushWord(w.word !== undefined ? w.word : w.text, w.start, w.end);
         }
         const stext = String(seg.text || "").trim();
-        if (stext) segments.push({ start: num(seg.start), end: num(seg.end), text: stext });
+        // hasWords marks segments whose text is ALREADY represented in the
+        // flat `words` array above, so buildCues doesn't double up on them —
+        // but a segment can have real text and STILL contribute zero words
+        // (e.g. alignment failed entirely for that stretch, common for
+        // music/applause/crosstalk); those need to fall back to a
+        // segment-level cue instead of silently vanishing.
+        if (stext) segments.push({ start: num(seg.start), end: num(seg.end), text: stext, hasWords: Array.isArray(ws) && ws.length > 0 });
       }
     }
     // WhisperX also emits a flat word_segments[]
@@ -137,14 +151,33 @@
       { maxWords: 7, maxChars: 38, maxDur: 5, maxGap: 0.7, punct: true },
       opts
     );
-    if (model.words && model.words.length) return cuesFromWords(model.words, o);
-    // No word timings — one cue per segment, re-wrapped only if very long.
-    return (model.segments || []).map((s) => ({
-      start: s.start ?? 0,
-      end: s.end ?? (s.start ?? 0) + 2,
-      words: null,
-      text: s.text,
-    }));
+    const segs = model.segments || [];
+    if (!model.words || !model.words.length) {
+      // No word timings anywhere — one cue per segment, in order. _segIdx
+      // records the 1:1 mapping to model.segments explicitly (app.js's
+      // inline-edit code reads it back) instead of relying on matching array
+      // positions, which breaks once word-based and segment-based cues can
+      // be interleaved (see below).
+      return segs.map((s, i) => ({
+        start: s.start ?? 0,
+        end: s.end ?? (s.start ?? 0) + 2,
+        words: null,
+        text: s.text,
+        _segIdx: i,
+      }));
+    }
+    const cues = cuesFromWords(model.words, o);
+    // A segment can have real text but contribute zero words — alignment
+    // failed for that stretch entirely (e.g. music/applause/crosstalk) — so
+    // it never reaches model.words and would otherwise vanish silently.
+    // Fall back to a segment-level cue for exactly those, merged in
+    // chronologically with the word-based ones.
+    segs.forEach((s, i) => {
+      if (s.hasWords) return;
+      cues.push({ start: s.start ?? 0, end: s.end ?? (s.start ?? 0) + 2, words: null, text: s.text, _segIdx: i });
+    });
+    cues.sort((a, b) => a.start - b.start);
+    return cues;
   }
 
   function cuesFromWords(words, o) {

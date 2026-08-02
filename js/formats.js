@@ -117,11 +117,21 @@ Format: Layer, Start, End, Style, MarginL, MarginR, MarginV, Effect, Text
     const lines = cues.map((c) => {
       let text;
       if (useK && c.words && c.words.length) {
+        // Round each word's CUMULATIVE end time (from the cue start), then
+        // take the difference from the previous cumulative point, instead of
+        // rounding each word's own duration in isolation — bounds the total
+        // drift across the cue to a single rounding step instead of summing
+        // every word's independent rounding error (which on a long,
+        // many-word cue can drift the karaoke sweep tens-to-100ms from the
+        // cue's actual end time).
+        let prevCs = 0;
         text = c.words
           .map((w, j) => {
             const next = c.words[j + 1];
             const holdUntil = next ? next.start : w.end;
-            const cs = Math.max(1, Math.round((holdUntil - w.start) * 100));
+            const cumCs = Math.round((holdUntil - c.start) * 100);
+            const cs = Math.max(1, cumCs - prevCs);
+            prevCs += cs;
             return `{\\kf${cs}}${escapeASS(w.word)}${j < c.words.length - 1 ? " " : ""}`;
           })
           .join("");
