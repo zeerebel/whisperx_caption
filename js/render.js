@@ -219,6 +219,40 @@
     return { lines, fontPx, tracking, lineHeightPx, blockTop, blockHeight, boxLeft, boxRight, spaceW };
   }
 
+  // Keep the animated/boxed block fully on-canvas. Scale animations (zoom-in,
+  // bounce-in, pop-scale-in) grow the block around its own center; at high
+  // intensity/box-pad combos the grown box can extend past the PHYSICAL frame
+  // edge and get silently clipped there. This is independent of vAlign, and
+  // independent of the crop-band feature — crop can't fix it, since for
+  // vAlign=bottom the band bottom is anchored to the frame bottom, so the
+  // overflow is past the frame itself, not just past the band. Also covers
+  // the s=1 case: a large static box pad with a small edge margin overflows
+  // the same way with no animation at all. Clamp translation first; if the
+  // block still cannot fit even centered (extreme multi-line + max zoom),
+  // shrink it uniformly as a last resort so nothing ever draws off-canvas.
+  function clampOnFrame(line, cx, cy, halfW, halfH, W, H) {
+    // A small inset (not just <=W/H) so the clamped edge never lands exactly
+    // on the boundary pixel, where sub-pixel/antialiasing rounding could tip
+    // a hairline over — imperceptible, but keeps the guarantee robust.
+    const margin = Math.max(1, 0.002 * Math.min(W, H));
+    const Wm = W - margin, Hm = H - margin;
+    // The shrink budget must free up `margin` on BOTH sides (a centered box
+    // uses half its size reduction on each edge), so it is 2*margin, not margin.
+    let s = Math.max(line.sx, line.sy, 0.001);
+    if (halfH * 2 * s > H - 2 * margin) s = (H - 2 * margin) / (halfH * 2);
+    if (halfW * 2 * s > W - 2 * margin) s = Math.min(s, (W - 2 * margin) / (halfW * 2));
+    if (s < line.sx) line.sx = s;
+    if (s < line.sy) line.sy = s;
+    const top = cy - line.sy * halfH + line.sy * line.dy;
+    const bot = cy + line.sy * halfH + line.sy * line.dy;
+    if (bot > Hm) line.dy -= (bot - Hm) / line.sy;
+    else if (top < margin) line.dy -= (top - margin) / line.sy;
+    const left = cx - line.sx * halfW + line.sx * line.dx;
+    const right = cx + line.sx * halfW + line.sx * line.dx;
+    if (right > Wm) line.dx -= (right - Wm) / line.sx;
+    else if (left < margin) line.dx -= (left - margin) / line.sx;
+  }
+
   // ---------------- main draw ----------------
   function drawCaption(ctx, cue, style, t, W, H, anim) {
     ctx.clearRect(0, 0, W, H);
@@ -243,6 +277,11 @@
 
     const cx = (L.boxLeft + L.boxRight) / 2;
     const cy = L.blockTop + L.blockHeight / 2;
+
+    if (scope === "line") {
+      const padPxSafe = style.boxOpacity > 0.02 ? padPx : 0;
+      clampOnFrame(line, cx, cy, (L.boxRight - L.boxLeft) / 2 + padPxSafe, L.blockHeight / 2 + padPxSafe, W, H);
+    }
 
     ctx.save();
     // line-level transform around block center

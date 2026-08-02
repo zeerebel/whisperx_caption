@@ -4,6 +4,117 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.13.0 — Multi-model audit round 2 (19 dimensions, adversarially verified)
+A fanned-out audit workflow reviewed the app across 19 dimensions (export
+correctness, parsing/data-integrity, presets, memory/perf, the CLI tool, and
+more) using a mix of models/effort levels, with every finding independently
+cross-checked by a second pass before being trusted. 23 findings confirmed
+and fixed; each fix has a targeted regression test in `scratchpad/e2e/` and
+the full suite was re-run clean after every batch.
+
+- **Fixed: boxed captions with a scale animation (or even just a large static
+  box pad) could clip past the physical bottom/top/side edge of the frame** —
+  this is **open thread #1 from v1.12.2, now resolved.** `layout()` positioned
+  a bottom-aligned block with zero reserve for the scale-animation/box growth
+  applied later purely as a `ctx.scale()` transform in `drawCaption`, which
+  `layout()` has no visibility into. Rather than threading `anim` into the
+  shared preview+export positioning function (the originally-scoped fix, which
+  would have needed retuning every alignment case), added a general
+  `clampOnFrame()` step in `drawCaption` that measures where the scaled+
+  translated line's edges actually land in device pixels and pulls them back
+  inside a small safety margin — works for any alignment, animation, or
+  crop-band setting, not just the reported bottom+zoom-in combination.
+  Verified pixel-exact: zero edge-touching alpha across bottom/top/middle
+  vAlign, horizontal-center, static boxes, and all 3 scale animations, with
+  crop both on and off; the existing 7-test + 48-combo matrix suite is
+  unaffected (identical crop-band dimensions as before).
+- **Fixed: loading a new transcript while an export was running silently
+  corrupted the output.** `computeCaptionBand` and `exportWebm`'s per-frame
+  `cueAt(t)` read `state.cues`/`state.duration` live; if a transcript swap
+  landed in one of the several `await` gaps an export runs through (font
+  loading, the save-file picker), the render loop could end up drawing the
+  NEW transcript's captions into a frame count computed from the OLD
+  transcript's duration — a zip whose frame count and caption content
+  silently disagreed. Fixed at the single choke point every load path funnels
+  through (`loadTranscriptText`): now refuses to load while `state.exporting`
+  is true, with a toast telling the user to cancel the export first (the file
+  input is also disabled for the same window). Verified by racing a real
+  transcript swap against a real in-flight export and confirming both the
+  guard toast and the untouched original content.
+- **Fixed: the real-time WebM export had no memory guard at all**, unlike the
+  PNG-sequence and `.mov` paths — `MediaRecorder` only hands back its combined
+  Blob at `stop()`, so the whole clip's encoded bytes sit in memory for the
+  entire recording (a 42-minute clip at the default 12 Mbps bitrate is
+  ~3.8 GB). Added the same kind of up-front, dismissible size-estimate warning
+  the other two export paths already had, and switched `MediaRecorder.start()`
+  to a 1-second timeslice so it flushes periodically instead of buffering the
+  whole clip internally until stop().
+- **Fixed: the PNG-sequence export's 4 GiB `.zip` cap (a hard limit of the
+  STORE-only, non-ZIP64 format) only surfaced as a failure once a running
+  export actually crossed it** — for a long/high-res clip that could be deep
+  into a render that already took many minutes. Added an up-front, dismissible
+  estimate before rendering starts, so the user finds out before spending that
+  time, not after.
+- **Fixed: a zero-word transcript segment (real text, but alignment produced
+  no per-word timing — common for music/applause/crosstalk markers like
+  `[applause]`) silently vanished** instead of becoming a caption. `buildCues`
+  now merges a segment-level fallback cue for exactly those segments,
+  chronologically interleaved with the word-based ones, each tagged with an
+  explicit `_segIdx` back-reference so inline editing keeps tracking the right
+  source segment even when word-based and segment-based cues are interleaved.
+- **Fixed: a malformed non-numeric timestamp (e.g. `"start": "N/A"`) produced
+  `NaN`**, which survives every downstream `!= null`/`?? 0` guard and silently
+  corrupts interpolation, the renderer's cue-visibility check, and every
+  exported timestamp field. `parse.js`'s `num()` now treats a `NaN` result as
+  missing, same as `null`/`undefined`/`""`, so it gets interpolated instead.
+- **Fixed: preset save/update/delete/import always reported success even when
+  nothing persisted.** `setUserPresets` swallowed `localStorage.setItem`
+  failures (quota exceeded, private-browsing storage blocks) without telling
+  its callers; all four call sites now check its return value and show an
+  error toast instead of a false "✓ Saved" — verified by forcing `setItem` to
+  throw and confirming each of the three user-facing toasts.
+- **Fixed: switching between built-in presets that don't specify the same
+  fields let values bleed across.** Applying "Bold Yellow (Hormozi)" (sets
+  `optMarginY`/`optMaxWidth`/`optMaxWords`/`optMaxChars`) and then "Clean
+  White" (doesn't mention any of those) left Hormozi's values in place instead
+  of resetting to the app's true defaults. Fixed by capturing a `DEFAULT_STYLE`
+  snapshot once at boot (before any preset is ever applied) and falling back
+  to it for any key a preset's style object omits.
+- **Fixed: a stale `editingIndex` made re-clicking a caption's edit button a
+  silent no-op.** Any full cue re-group (loading a new transcript, changing a
+  timing control like Max chars/line) rebuilds every row from scratch as
+  plain, non-editing rows, but the module-level `editingIndex` tracking which
+  row had an editor open wasn't reset — so `enterEditMode`'s
+  `editingIndex === i` short-circuit believed a since-rebuilt row was already
+  being edited and did nothing on the next click. Now reset inside
+  `rebuildCues()`.
+- **Fixed: the ETA display could show `"1m 60s"` instead of `"2m 0s"`** at
+  second-boundary crossings — the minutes/seconds/hours fields were each
+  floored independently from the un-rounded remaining time instead of from one
+  rounded total, so a value like `59.6s` split into `m=0, s=59.6→59` while a
+  *different* rounding of the same instant would carry to `1m`. Now rounds the
+  total once and derives every field from that single integer.
+- **Fixed: ASS karaoke (`\kf`) timing could drift tens–100ms from the cue's
+  actual end on a long, many-word cue.** Each word's `\kf` duration was
+  rounded to centiseconds independently, summing every word's own rounding
+  error across the cue. Now rounds each word's *cumulative* end time (from the
+  cue start) and takes the difference from the previous cumulative point,
+  bounding total drift to a single rounding step regardless of word count.
+- **CLI tool (`tools/render_export.mjs`) robustness** — was silently
+  mis-handling or crashing on: SRT/VTT transcripts (misreported as "not valid
+  JSON" even though the app natively supports them); a `--mov` codec typo
+  positioned before the transcript arg (silently absorbed the typo as the
+  transcript path); a corrupt zip entry (unhandled `EventEmitter` 'error'
+  throw bypassing cleanup); Ctrl+C (raw Playwright stack trace instead of a
+  clean exit code); an invalid `--style` value for any control (silently set
+  whatever the browser control coerced it to instead of failing); a custom/
+  uploaded font referenced by a style file (silently fell back to a system
+  font with no indication); and a Google Fonts network failure for the
+  selected font (silently rendered in a fallback typeface). All now fail
+  loudly with a clear message and non-zero exit instead of silently producing
+  wrong output — verified live against a real network-restricted sandbox for
+  every case above.
+
 ## v1.12.4 — Style hand-off to the local CLI tool
 - **Added: ⬇ Style settings (.json)** button at the bottom of the Export tab.
   Downloads the exact look you built in the app — font, colors, animation,

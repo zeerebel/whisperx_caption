@@ -56,10 +56,17 @@ matrix, including error-path coverage (missing/invalid transcript, bad
   confirm which build is live.
 
 ## Current version state
-- **Live on main: v1.12.4** (#27→v1.12.0, #28→v1.12.1, #31→v1.12.2, #32→v1.12.3,
-  #33→CLI tool, →v1.12.4, all merged) — v1.12.1's live-ness confirmed via a
-  clean Cloudflare deploy log (see "Deploy pipeline was silently landing
+- **Live on main: v1.13.0** (#27→v1.12.0, #28→v1.12.1, #31→v1.12.2, #32→v1.12.3,
+  #33→CLI tool, →v1.12.4, →v1.13.0, all merged) — v1.12.1's live-ness confirmed
+  via a clean Cloudflare deploy log (see "Deploy pipeline was silently landing
   stale builds" below).
+- **v1.13.0 — multi-model audit round 2.** 19-dimension fanned-out audit,
+  every finding adversarially cross-checked before being trusted; 23 confirmed
+  and fixed, each with its own regression test. Full detail in CHANGELOG.md
+  v1.13.0. Notably closes **open thread #1 below** (bottom-frame-edge clipping
+  — a general `clampOnFrame()` fix instead of the originally-scoped
+  `layout()`-position approach) and adds up-front memory/size warnings to the
+  WebM and PNG-sequence export paths (partially addresses open thread #6).
 - **v1.12.3 — live export ETA, plus measured throughput numbers.** The app's
   owner reported a real 42-minute export left running 10 hours with no
   feedback on whether it was working. Rather than guess, I benchmarked actual
@@ -320,17 +327,13 @@ Notes:
   "Deploy pipeline was silently landing stale builds" above.
 
 ## Open threads
-1. **Bottom-frame-edge clipping for boxed captions + scale animations at
-   extreme settings** (found this session, not fixed — see "v1.12.2" above for
-   full root cause). Reproduce: box pad ~80 + Zoom In or Bounce In at
-   intensity 2, vAlign bottom. Fix requires threading `anim` into
-   `render.js`'s `layout()` so the resting position reserves room for the
-   scale/box growth, same idea as `animHeadroom()` but applied to *position*
-   instead of *crop-band size* — touches the shared preview+export function,
-   do this deliberately with its own regression tests (a reusable one exists:
-   `scratchpad/e2e/test8_box_zoom.mjs` from this session, if the scratchpad
-   survived — otherwise recreate: box pad 80, boxOpacity 0.55, zoom-in
-   intensity 2, crop ON, `check_edges.py` on the resulting zip).
+1. ~~Bottom-frame-edge clipping for boxed captions + scale animations at
+   extreme settings~~ — **fixed in v1.13.0**, see CHANGELOG.md. Was fixed with
+   a general `clampOnFrame()` step in `drawCaption` (measures the scaled+
+   translated edges in device pixels, pulls them back inside a margin) rather
+   than the `layout()`-position approach originally scoped here — works for
+   every alignment/animation/crop combination instead of just the reported
+   bottom+zoom-in one.
 2. **The real fix for background-tab stalls: move frame-render + PNG-encode
    into a Web Worker + OffscreenCanvas.** v1.12.1's wall-time yield + hidden-tab
    warning are mitigations (fewer clamp-exposed timers, and telling the user
@@ -355,7 +358,15 @@ Notes:
 6. **In-memory PNG-sequence fallback can OOM on long exports** in browsers
    without the File System Access API (Firefox, Safari) — the
    streaming-straight-to-disk path (`showSaveFilePicker`) only exists on
-   Chromium. Not addressed.
+   Chromium. v1.13.0 added up-front dismissible size-estimate warnings (before
+   this, a long clip would render for potentially hours before the .zip's hard
+   4 GiB cap threw), and the same for the WebM export's real-time in-memory
+   recording — but the underlying constraint (no streaming sink for those two
+   paths on non-Chromium browsers) is a warning, not a fix. Actually
+   eliminating the risk would mean either a streaming .zip encoder that
+   doesn't depend on `showSaveFilePicker`, or pushing those two paths through
+   the local CLI tool (`tools/render_export.mjs`) instead, which uses native
+   ffmpeg and never holds the whole clip in the browser's memory.
 7. **Premium Cloud Transcribe** — full plan in `docs/PREMIUM_PLAN.md`, and a
    draft implementation exists in (closed, unmerged) PR #23 — Cloudflare
    Worker + Replicate WhisperX + a "Cloud Transcribe" panel, fully inert

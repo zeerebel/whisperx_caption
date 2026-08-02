@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.12.4";
+  const APP_VERSION = "1.13.0";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -230,6 +230,12 @@
     decorateEditedCues();
     state.duration = (state.cues.length ? state.cues[state.cues.length - 1].end : 0) + 1.5;
     if (audio.src && audio.duration) state.duration = Math.max(state.duration, audio.duration);
+    // renderCueStrip() below rebuilds every row from scratch as plain
+    // (non-editing) rows, so a stale index left over from before this rebuild
+    // would make the NEXT click on that row a silent no-op — enterEditMode's
+    // `if (editingIndex === i) return;` short-circuits, believing it is
+    // already open when nothing actually is.
+    editingIndex = -1;
     renderCueStrip();
     drawPreview();
     updateTimeUI();
@@ -358,8 +364,10 @@
           c.original = { text: WXC.joinWords(pristineWords(c.words)) };
         }
       } else {
-        // Word-less cues map 1:1, in order, onto model.segments.
-        const seg = state.model && state.model.segments && state.model.segments[i];
+        // Word-less cues carry the index of their source segment (they can
+        // be interleaved with word-based cues, so the cue's own array
+        // position no longer lines up with model.segments' — see parse.js).
+        const seg = state.model && state.model.segments && c._segIdx != null && state.model.segments[c._segIdx];
         if (seg && seg._orig !== undefined) { c.edited = true; c.original = { text: seg._orig }; }
       }
     });
@@ -394,7 +402,7 @@
         oldRuns.forEach((r) => { if (!mw.some((w) => w._run === r)) editRuns.delete(r); });
       }
     } else {
-      const seg = state.model.segments[i];
+      const seg = c._segIdx != null ? state.model.segments[c._segIdx] : undefined;
       if (!seg) return;
       if (seg._orig === undefined) seg._orig = seg.text;
       seg.text = newText;
@@ -420,7 +428,7 @@
         editRuns.delete(r);
       });
     } else {
-      const seg = state.model.segments[i];
+      const seg = c._segIdx != null ? state.model.segments[c._segIdx] : undefined;
       if (seg && seg._orig !== undefined) { seg.text = seg._orig; delete seg._orig; }
     }
     rebuildCues();
@@ -481,6 +489,11 @@
 
   // ---------- file loading ----------
   function loadTranscriptText(name, text) {
+    // state.cues/state.duration are read mid-export (e.g. computeCaptionBand
+    // after the ensureFontsForExport await, exportWebm's per-frame cueAt(t))
+    // — swapping them out from under a running export silently mismatches the
+    // rendered frame count against the new transcript's content.
+    if (state.exporting) return toast("⚠️ Cancel the current export before loading a new transcript");
     try { state.model = WXC.parse(name, text); }
     catch (e) { return toast("⚠️ " + e.message); }
     editRuns.clear(); // stale edit originals belong to the previous transcript
@@ -549,6 +562,7 @@
     btn.classList.toggle("hidden", !b);
     btn.disabled = false;
     ["dlPngSeq", "dlPngFrame", "dlWebm", "dlMov", "playBtn"].forEach((id) => ($(id).disabled = b || !state.cues.length));
+    $("fileJson").disabled = b; // loading a new transcript mid-export corrupts the run — see loadTranscriptText's guard
   }
 
   // ---------- export cancellation ----------
@@ -664,8 +678,14 @@
     if (!(rate > 0)) return "";
     const remainingSec = (total - done) / rate;
     if (remainingSec < 5) return "";
-    const m = Math.floor(remainingSec / 60), h = Math.floor(m / 60);
-    const left = h > 0 ? `${h}h ${m % 60}m` : m > 0 ? `${m}m ${Math.round(remainingSec % 60)}s` : `${Math.round(remainingSec)}s`;
+    // Round to whole seconds FIRST, then derive h/m/s from that integer — if
+    // the raw value's own remainder is rounded after the minute bucket is
+    // floored from the raw value, the two can disagree at a boundary
+    // (remainingSec=119.6 -> floor gives m=1 but Math.round(...%60) gives
+    // "60s", i.e. "1m 60s" instead of rolling over to "2m 0s").
+    const total_ = Math.round(remainingSec);
+    const s = total_ % 60, m = Math.floor(total_ / 60) % 60, h = Math.floor(total_ / 3600);
+    const left = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${s}s` : `${s}s`;
     return ` — ~${left} left`;
   }
 
@@ -748,6 +768,20 @@
     if (frameCount + 1 > 0xffff) {
       alert(`${frameCount} frames at ${fps}fps is too many for one .zip (limit ${0xffff - 1} frames).\n\nLower the fps/resolution or trim the audio for a shorter clip.`);
       return;
+    }
+    // The .zip format used here (STORE-only, no ZIP64) caps total size at
+    // 4 GiB — store-only-zip.js enforces that as a hard failure, but only
+    // once the running export actually crosses it, which for a long/high-res
+    // clip can be deep into a render that already took many minutes. Estimate
+    // up front — using the UNCROPPED frame size and a deliberately generous
+    // bytes/pixel figure (real PNG frames from this app run well under it) —
+    // so the user can back out before spending that time.
+    const estZipBytes = frameCount * w * h * 0.15;
+    if (estZipBytes > 4 * 1024 * 1024 * 1024 * 0.85) {
+      const cropTip = $("optCropBand") && $("optCropBand").checked
+        ? "" : ` Turn on "Crop to caption band" to shrink every frame to just the caption strip, or`;
+      if (!confirm(`${frameCount} frames at ${w}×${h} may approach the 4 GiB limit for one .zip file (this format cannot go larger).\n\nIf the render reaches that limit it fails only at the very end and the work is lost.\n\nTip:${cropTip} lower the resolution/FPS, or export a shorter clip. Continue anyway?`))
+        return;
     }
 
     // Stream the zip straight to disk when the browser allows it (Chrome/Edge):
@@ -860,6 +894,7 @@
 
   // Opaque WebM recorded in real time — for the chroma-key path (browser WebM
   // cannot carry a real alpha channel; see README). Records background + caption.
+  const WEBM_BITRATE = 12000000; // bits/sec — also fed to MediaRecorder below
   async function exportWebm() {
     if (!state.cues.length || state.exporting) return;
     if (typeof MediaRecorder === "undefined") return toast("⚠️ MediaRecorder not supported here");
@@ -868,6 +903,15 @@
     const bg = bgColor() || "#000000";
     if (!bgColor())
       toast("Tip: WebM can't store alpha — set Background to a Solid color to key it out.");
+    // Unlike the PNG-sequence/.mov paths, this records in real time with no
+    // streaming-to-disk option: MediaRecorder hands back one Blob covering the
+    // WHOLE clip only at stop(), so the entire encoded video sits in memory
+    // for the full recording. Warn before that gets big enough to risk
+    // crashing the tab (a 42-minute clip at this bitrate is ~3.8 GB).
+    const estBytes = (WEBM_BITRATE / 8) * state.duration;
+    if (estBytes > 400 * 1024 * 1024 &&
+        !confirm(`This clip is ~${Math.round(state.duration)}s long and records in real time, holding an estimated ${(estBytes / 1e6).toFixed(0)} MB in memory until it finishes.\n\nTip: lower the resolution or record a shorter clip — or use the PNG sequence / .mov export instead, which do not hold the whole clip in memory at once. Continue?`))
+      return;
     const webmName = `${baseName()}_${w}x${h}_chroma.webm`;
     const saveHandle = await pickSaveHandle(webmName, { "video/webm": [".webm"] });
     if (saveHandle === "cancel") return; // user dismissed the save dialog
@@ -885,11 +929,13 @@
 
       stream = rec.captureStream(fps);
       const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm";
-      mr = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 12000000 });
+      mr = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: WEBM_BITRATE });
       const chunks = [];
       mr.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
       const stopped = new Promise((r) => (mr.onstop = r));
-      mr.start();
+      // A timeslice makes the recorder flush periodically instead of buffering
+      // the whole clip internally until stop() — safer for long recordings.
+      mr.start(1000);
       const startT = performance.now();
       await new Promise((resolve, reject) => {
         function frame() {
@@ -1180,6 +1226,7 @@
     "optExportKaraoke", "optBgMode", "optChroma", "optChromaCustom", "optRes", "optFps", "optMovCodec",
     "optCropBand",
   ];
+  let DEFAULT_STYLE = {}; // set once in wire(), before loadStyle() restores the last session
   // Snapshot every style control into a plain object (the shape a preset stores).
   function captureStyle() {
     const o = {};
@@ -1257,7 +1304,12 @@
     try { return JSON.parse(localStorage.getItem(PRESET_LS)) || {}; } catch (e) { return {}; }
   }
   function setUserPresets(o) {
-    try { localStorage.setItem(PRESET_LS, JSON.stringify(o)); } catch (e) {}
+    // Report success/failure so callers don't show a green "Saved" toast when
+    // localStorage was actually full/blocked (e.g. Safari private mode) and
+    // nothing was written — the preset would then silently vanish on reload
+    // with no error ever shown.
+    try { localStorage.setItem(PRESET_LS, JSON.stringify(o)); return true; }
+    catch (e) { return false; }
   }
   function buildPresetList(selectValue) {
     const sel = $("presetSelect");
@@ -1279,11 +1331,17 @@
   }
   // Apply a partial style object, then refresh everything downstream so the
   // change behaves exactly like the user having set each control by hand.
+  // Presets are PARTIAL (each only lists the fields it cares about), so a
+  // field one preset omits must fall back to the app's own pristine default,
+  // not silently keep whatever value the PREVIOUSLY applied preset left it
+  // at — otherwise auditioning several presets in a row bleeds
+  // grouping/margin/etc. fields across unrelated presets.
   function applyPreset(style) {
     STYLE_KEYS.forEach((id) => {
-      if (style[id] === undefined) return;
+      const v = style[id] !== undefined ? style[id] : DEFAULT_STYLE[id];
+      if (v === undefined) return;
       const el = $(id); if (!el) return;
-      if (el.type === "checkbox") el.checked = !!style[id]; else el.value = style[id];
+      if (el.type === "checkbox") el.checked = !!v; else el.value = v;
     });
     fontValue($("optFont").value);          // trigger Google-font load if needed
     if ($("optBgMode").value === "image") $("optBgMode").value = "transparent";
@@ -1308,7 +1366,7 @@
     const user = getUserPresets();
     if (user[name] && !confirm(`Overwrite your preset “${name}”?`)) return;
     user[name] = captureStyle();
-    setUserPresets(user);
+    if (!setUserPresets(user)) return toast("⚠️ Could not save preset (storage full or blocked?)");
     buildPresetList("u:" + name);
     toast(`✓ Saved preset “${name}”`);
   }
@@ -1317,7 +1375,7 @@
     if (!p || p.builtin) return toast("Pick one of your own presets to update (built-ins are read-only)");
     const user = getUserPresets();
     user[p.name] = captureStyle();
-    setUserPresets(user);
+    if (!setUserPresets(user)) return toast("⚠️ Could not update preset (storage full or blocked?)");
     toast(`✓ Updated “${p.name}”`);
   }
   function deleteCurrentPreset() {
@@ -1326,7 +1384,7 @@
     if (!confirm(`Delete your preset “${p.name}”?`)) return;
     const user = getUserPresets();
     delete user[p.name];
-    setUserPresets(user);
+    if (!setUserPresets(user)) return toast("⚠️ Could not delete preset (storage full or blocked?)");
     buildPresetList("");
     toast(`✓ Deleted “${p.name}”`);
   }
@@ -1353,7 +1411,7 @@
       if (clashes.length && !confirm(`Overwrite ${clashes.length} preset(s) you already have (${clashes.slice(0, 3).join(", ")}${clashes.length > 3 ? "…" : ""})?`))
         return;
       names.forEach((n) => { user[n] = incoming[n]; });
-      setUserPresets(user);
+      if (!setUserPresets(user)) return toast("⚠️ Could not import presets (storage full or blocked?)");
       buildPresetList("");
       toast(`✓ Imported ${names.length} preset${names.length > 1 ? "s" : ""}`);
     });
@@ -1412,6 +1470,10 @@
     console.log("WhisperX Caption Studio v" + APP_VERSION);
     buildFontList();
     buildAnimList();
+    // Snapshot BEFORE loadStyle() restores the user's last session — this is
+    // the pristine, as-shipped default for every control, used by
+    // applyPreset() to fill in whatever a partial preset doesn't mention.
+    DEFAULT_STYLE = captureStyle();
     loadStyle();
     if ($("optBgMode").value === "image") $("optBgMode").value = "transparent"; // image blobs can't be persisted
     updateBackground();

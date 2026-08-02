@@ -11,7 +11,7 @@
 // than the in-browser ffmpeg.wasm encoder.
 //
 // Usage:
-//   node tools/render_export.mjs <transcript.json> [options]
+//   node tools/render_export.mjs <transcript.json|.srt|.vtt> [options]
 //
 //   --style <path.json>    flat JSON of style-control ids -> values, same shape
 //                          as the app's presets (e.g. {"optFont":"Anton",
@@ -88,9 +88,16 @@ function parseArgs(argv) {
     else if (a === "--out") opts.out = val();
     else if (a === "--mov") {
       const next = args[i + 1];
+      // Disambiguate by content, not by whether the positional transcript has
+      // been seen yet — "--mov" can legally appear before or after it. A token
+      // is treated as the (still-unset) transcript positional only if it looks
+      // like a file path/name; otherwise it is an unrecognized codec, however
+      // the order.
+      const looksLikeFile = (s) => !s ? false : /[./\\]/.test(s) || fs.existsSync(s);
       if (next && Object.hasOwn(MOV_CODECS, next)) { opts.mov = next; i++; }
-      else if (next && !next.startsWith("--") && opts.transcript) fail(`unknown --mov codec "${next}" (use qtrle or prores)`);
-      else opts.mov = "qtrle"; // bare --mov: a following non-codec token is the transcript positional
+      else if (next && !next.startsWith("--") && !(opts.transcript === null && looksLikeFile(next)))
+        fail(`unknown --mov codec "${next}" (use qtrle or prores)`);
+      else opts.mov = "qtrle"; // bare --mov followed by the transcript positional (or nothing)
     }
     else if (a.startsWith("--")) fail(`unknown option ${a} (see --help)`);
     else if (!opts.transcript) opts.transcript = a;
@@ -103,8 +110,12 @@ function parseArgs(argv) {
 function validate(opts) {
   const transcript = path.resolve(opts.transcript);
   if (!fs.existsSync(transcript)) fail(`transcript not found: ${transcript}`);
-  try { JSON.parse(fs.readFileSync(transcript, "utf8")); }
-  catch (e) { fail(`transcript is not valid JSON: ${transcript} (${e.message})`); }
+  // The app (and this CLI, via the same #fileJson input) also accepts .srt/.vtt
+  // — only .json transcripts are actual JSON, so only sanity-check those here.
+  if (/\.json$/i.test(transcript)) {
+    try { JSON.parse(fs.readFileSync(transcript, "utf8")); }
+    catch (e) { fail(`transcript is not valid JSON: ${transcript} (${e.message})`); }
+  }
 
   let style = null;
   if (opts.style) {
@@ -155,32 +166,69 @@ function startServer() {
 }
 
 // ---------- page helpers (same mechanism as the app's own UI events) ----------
-async function setControl(page, id, value) {
-  await page.evaluate(([id, value]) => {
+// Setting a control the same way the browser's own UI does (assign .value or
+// .checked, dispatch input+change) is what makes a captured/hand-edited style
+// file behave identically to using the app -- but naively injecting whatever
+// value is given can silently mask real problems (a mistyped enum, a value
+// the input's own sanitization rejects), turning them into a wrong-looking
+// but successful render instead of a clear error. This validates by control
+// type and returns what happened so applyStyle can fail loudly instead of
+// spending minutes rendering something quietly broken.
+async function setControl(page, id, value, { allowInject = false } = {}) {
+  return page.evaluate(([id, value, allowInject]) => {
     const el = document.getElementById(id);
-    if (!el) return;
-    if (el.tagName === "SELECT" && ![...el.options].some((o) => o.value === String(value))) {
-      const o = document.createElement("option");
-      o.value = String(value); o.textContent = String(value);
-      el.appendChild(o); // the renderer only reads .value, so a custom res/fps works fine
+    if (!el) return { ok: false, reason: "missing" };
+    const sval = String(value);
+    if (el.tagName === "SELECT") {
+      const has = [...el.options].some((o) => o.value === sval);
+      if (!has) {
+        // Only --res/--fps are deliberately free-form (the renderer only
+        // reads .value, so an injected option works fine there). Every other
+        // select (animation, alignment, font, codec, ...) is a closed enum --
+        // a value that isn't one of its real options is a typo or a stale
+        // id from a different app version, not a legitimate custom value.
+        if (!allowInject) return { ok: false, reason: "badEnum", options: [...el.options].map((o) => o.value).join(", ") };
+        const o = document.createElement("option");
+        o.value = sval; o.textContent = sval;
+        el.appendChild(o);
+      }
+    } else if (el.type === "number" && sval !== "" && !/^-?\d+(\.\d+)?$/.test(sval)) {
+      return { ok: false, reason: "badNumber" };
+    } else if (el.type === "color" && !/^#[0-9a-fA-F]{6}$/.test(sval)) {
+      return { ok: false, reason: "badColor" };
     }
+    if (id === "optRes" && !/^\d+x\d+$/.test(sval)) return { ok: false, reason: "badRes" };
+    if (id === "optFps" && !(/^\d+$/.test(sval) && +sval > 0)) return { ok: false, reason: "badFps" };
     if (el.type === "checkbox") el.checked = !!value && value !== "false";
-    else el.value = String(value);
+    else el.value = sval;
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
-  }, [id, value]);
+    return { ok: true };
+  }, [id, value, allowInject]);
 }
 
 async function applyStyle(page, styleObj) {
-  const unknown = [];
+  const problems = [];
   for (const [id, value] of Object.entries(styleObj)) {
     if (id === "optFont" && value === "__upload") continue; // the app never persists this sentinel either
     const exists = await page.evaluate((id) => !!document.getElementById(id), id);
-    if (!exists) { unknown.push(id); continue; }
-    await setControl(page, id, value);
+    if (!exists) { problems.push(`unknown style key "${id}" (ignored)`); continue; }
+    const allowInject = id === "optRes" || id === "optFps";
+    const r = await setControl(page, id, value, { allowInject });
+    if (r.ok) continue;
+    if (r.reason === "badEnum") problems.push(id === "optFont"
+      ? `optFont "${value}" is not a built-in font the CLI can load (an uploaded/custom font never registers in this headless page) -- re-export the style with a built-in font`
+      : `${id} "${value}" is not a valid option (use one of: ${r.options})`);
+    else if (r.reason === "badNumber") problems.push(`${id} "${value}" is not a number`);
+    else if (r.reason === "badColor") problems.push(`${id} "${value}" is not a #rrggbb color`);
+    else if (r.reason === "badRes") problems.push(`optRes "${value}" must look like 1920x1080`);
+    else if (r.reason === "badFps") problems.push(`optFps "${value}" must be a positive integer`);
   }
-  if (unknown.length)
-    console.warn(`warning: ignored unknown style keys: ${unknown.join(", ")}`);
+  // Any of these would otherwise render successfully with silently wrong
+  // output (blank/collapsed captions, black instead of the intended color,
+  // no animation, or a crash mid-render with a misleading message) -- fail
+  // before spending any time rendering, not after.
+  if (problems.length) fail("problems in --style file:\n  " + problems.join("\n  "));
 }
 
 const progressText = (page) =>
@@ -199,6 +247,7 @@ function extractZip(zipPath, destDir) {
         zip.openReadStream(entry, (err2, stream) => {
           if (err2) return reject(err2);
           const ws = fs.createWriteStream(path.join(destDir, name));
+          stream.on("error", (e) => { ws.destroy(); reject(new CliError(`export zip is corrupt (${entry.fileName}): ${e.message}`)); });
           stream.pipe(ws);
           ws.on("error", reject);
           ws.on("finish", () => { names.push(name); zip.readEntry(); });
@@ -237,6 +286,8 @@ function runFfmpeg(args) {
 }
 
 // ---------- main ----------
+let interrupted = false; // set by the SIGINT handler; checked in main().catch
+                          // so a Ctrl+C doesn't print a raw closed-browser error
 async function main() {
   const t0 = Date.now();
   const opts = validate(parseArgs(process.argv.slice(2)));
@@ -249,7 +300,7 @@ async function main() {
     if (browser) { try { await browser.close(); } catch {} browser = null; }
     server.close();
   };
-  process.on("SIGINT", () => { cleanup().finally(() => process.exit(130)); });
+  process.on("SIGINT", () => { interrupted = true; cleanup().finally(() => process.exit(130)); });
 
   try {
     try {
@@ -270,6 +321,19 @@ async function main() {
     });
     const page = await context.newPage();
     page.on("pageerror", (e) => console.warn("page error:", String(e).split("\n")[0]));
+    // The app's own font-load-failure check (document.fonts.check()) is
+    // unreliable -- it returns true even for a family that never registered
+    // (fallback quirk) -- and even when it does fire, its toast never reaches
+    // this CLI (the export watcher below only reads #exportProgress and
+    // window.__wxcAlert). A network-level failure on the Google Fonts host is
+    // a hard, unambiguous signal instead: if the CSS2 stylesheet or the font
+    // file itself can't be fetched, every frame silently renders in a fallback
+    // typeface with no other indication.
+    const fontRequestFailures = [];
+    page.on("requestfailed", (req) => {
+      const u = req.url();
+      if (/fonts\.(googleapis|gstatic)\.com/.test(u)) fontRequestFailures.push(u);
+    });
 
     console.log(`Booting WhisperX Caption Studio headlessly (http://127.0.0.1:${port}/)…`);
     await page.goto(`http://127.0.0.1:${port}/`, { waitUntil: "load" });
@@ -295,8 +359,8 @@ async function main() {
     // Style first, then explicit CLI flags (CLI wins over the style file;
     // app defaults already match the documented CLI defaults).
     if (opts.styleObj) { await applyStyle(page, opts.styleObj); console.log(`Applied style: ${opts.style}`); }
-    if (opts.res !== null) await setControl(page, "optRes", opts.res);
-    if (opts.fps !== null) await setControl(page, "optFps", opts.fps);
+    if (opts.res !== null) await setControl(page, "optRes", opts.res, { allowInject: true });
+    if (opts.fps !== null) await setControl(page, "optFps", opts.fps, { allowInject: true });
     if (opts.crop !== null) await setControl(page, "optCropBand", opts.crop);
     const eff = await page.evaluate(() => ({
       res: document.getElementById("optRes").value,
@@ -304,6 +368,21 @@ async function main() {
       crop: document.getElementById("optCropBand").checked,
     }));
     console.log(`Export settings: ${eff.res} @ ${eff.fps}fps, crop-to-caption-band ${eff.crop ? "on" : "off"}`);
+
+    // Give any Google Font request the style just triggered (via the preview
+    // re-rendering) a moment to fail, so it is caught before spending minutes
+    // rendering with an unnoticed fallback typeface. Only the FINAL selected
+    // font matters here — the page may have already tried and failed to load
+    // an earlier/default font (e.g. before a --style file changed it away
+    // from it), and ensureGFont() never retries a family it already tried, so
+    // checking "any Google Fonts failure at all" would flag an unrelated,
+    // no-longer-relevant font instead of (or in addition to) the real one.
+    await page.waitForLoadState("networkidle", { timeout: 4000 }).catch(() => {});
+    const selectedFont = await page.evaluate(() => document.getElementById("optFont").value);
+    const encodedFont = encodeURIComponent(selectedFont).replace(/%20/g, "+");
+    const relevantFailure = fontRequestFailures.find((u) => u.includes(`family=${encodedFont}`));
+    if (relevantFailure)
+      fail(`could not load the font "${selectedFont}" (network unreachable?): ${relevantFailure}\nEvery frame would silently render in a fallback typeface instead of the styled look.`);
 
     // ---- run the PNG-sequence export, relaying the app's live progress ----
     await page.click('.tab[data-tab="export"]');
@@ -397,6 +476,11 @@ async function main() {
 }
 
 main().catch((e) => {
+  // A Ctrl+C closes the browser mid-await, which rejects whatever main() was
+  // doing with a raw Playwright error racing the SIGINT handler's own
+  // cleanup+exit(130); check the flag so BOTH paths converge on the same
+  // clean outcome regardless of which one wins the race.
+  if (interrupted) { process.exit(130); return; }
   if (e instanceof CliError) { console.error("Error: " + e.message); process.exit(1); }
   console.error(e);
   process.exit(1);
