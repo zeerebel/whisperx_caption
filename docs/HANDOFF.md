@@ -56,10 +56,22 @@ matrix, including error-path coverage (missing/invalid transcript, bad
   confirm which build is live.
 
 ## Current version state
-- **Live on main: v1.13.0** (#27→v1.12.0, #28→v1.12.1, #31→v1.12.2, #32→v1.12.3,
-  #33→CLI tool, →v1.12.4, →v1.13.0, all merged) — v1.12.1's live-ness confirmed
-  via a clean Cloudflare deploy log (see "Deploy pipeline was silently landing
-  stale builds" below).
+- **Live on main: v1.14.0** (#27→v1.12.0, #28→v1.12.1, #31→v1.12.2, #32→v1.12.3,
+  #33→CLI tool, →v1.12.4, →v1.13.0, →v1.14.0, all merged) — v1.12.1's live-ness
+  confirmed via a clean Cloudflare deploy log (see "Deploy pipeline was
+  silently landing stale builds" below).
+- **v1.14.0 — export time-range trim, Screen Wake Lock, accessibility/mobile
+  pass.** Closes **open thread #3** (trim export to a time range — now a
+  first-class feature on the Export tab) and **open thread #4** (Screen Wake
+  Lock during export). Full detail in CHANGELOG.md v1.14.0, including several
+  accessibility fixes (keyboard nav in the cue-editing strip, focus
+  management, tab-widget ARIA state, unnamed controls) and a mobile
+  horizontal-scroll fix on the Guide tab. Built by two background agents
+  working concurrently in the same checkout (not isolated worktrees) — a
+  `git stash` incident occurred mid-flight from the resulting file
+  contention; recovered cleanly after a full diff review and the entire
+  regression suite passing, but **use isolated worktrees for concurrent
+  agents next time**, not a shared working directory.
 - **v1.13.0 — multi-model audit round 2.** 19-dimension fanned-out audit,
   every finding adversarially cross-checked before being trusted; 23 confirmed
   and fixed, each with its own regression test. Full detail in CHANGELOG.md
@@ -343,15 +355,13 @@ Notes:
    deserves its own session; the ffmpeg encode itself already runs in a
    Worker, only the canvas render + PNG encode (`renderExportFrames`) is on
    the main thread today.
-3. **Let the user trim the export time range.** Probably the single biggest
-   lever for "exports take too long" generically — most exports don't need
-   the full clip, and a shorter range beats optimizing the encode of frames
-   nobody wants. Not built yet.
-4. **Screen Wake Lock during export** (`navigator.wakeLock`) — a different
-   failure mode than tab-backgrounding: if the laptop screen locks/sleeps,
-   JS execution pauses entirely until manually woken, which would also
-   explain an export that "ran overnight and never finished." Cheap to add,
-   not done.
+3. ~~Let the user trim the export time range~~ — **built in v1.14.0**, see
+   CHANGELOG.md. Two fields on the Export tab (mm:ss.s or plain seconds,
+   blank = full clip); all four export paths and the crop-band sizing
+   respect it.
+4. ~~Screen Wake Lock during export~~ — **added in v1.14.0**, see
+   CHANGELOG.md. `navigator.wakeLock`, released on completion/cancel/error,
+   re-acquired on tab-visibility return.
 5. **ProRes 4444 is known-slow/OOM-prone in-browser** (see Gotchas above) —
    worth a stronger nudge toward qtrle (already the default) or the PNG
    sequence + external `ffmpeg` command for anyone who picks it anyway.
