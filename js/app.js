@@ -563,6 +563,28 @@
     btn.disabled = false;
     ["dlPngSeq", "dlPngFrame", "dlWebm", "dlMov", "playBtn"].forEach((id) => ($(id).disabled = b || !state.cues.length));
     $("fileJson").disabled = b; // loading a new transcript mid-export corrupts the run — see loadTranscriptText's guard
+    if (b) acquireWakeLock(); else releaseWakeLock();
+  }
+
+  // If the SCREEN locks/sleeps mid-export (distinct from the tab just being
+  // backgrounded, which the hidden-tab warning below already covers), JS
+  // execution pauses entirely until the device is manually woken — which
+  // would also explain an export that "ran overnight and never finished."
+  // navigator.wakeLock keeps the screen on for the export's duration; it is
+  // a nice-to-have (not universally supported, and the user can still
+  // override it at the OS level), so every failure here is swallowed.
+  let wakeLock = null;
+  async function acquireWakeLock() {
+    if (!("wakeLock" in navigator)) return;
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } catch (e) { wakeLock = null; } // e.g. denied, or the tab is already hidden
+  }
+  async function releaseWakeLock() {
+    if (!wakeLock) return;
+    try { await wakeLock.release(); } catch (e) {}
+    wakeLock = null;
   }
 
   // ---------- export cancellation ----------
@@ -1601,6 +1623,9 @@
           $("exportProgress").textContent = progressBeforeHidden;
         progressBeforeHidden = null;
         toast("⚠️ Keep this tab visible — hidden tabs are throttled and the export slows to a crawl");
+        // The spec auto-releases a wake lock the instant the tab goes
+        // hidden; it must be re-requested by hand once it is visible again.
+        acquireWakeLock();
       }
     });
 
