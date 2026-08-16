@@ -105,7 +105,12 @@ h1{margin:0}
   display:grid;grid-template-columns:1fr 400px;gap:var(--space-6);
   padding:var(--space-6) var(--space-5) var(--space-5);max-width:1500px;margin:0 auto;align-items:start;
 }
-@media (max-width:960px){ .layout{grid-template-columns:1fr;gap:var(--space-5);padding:var(--space-4)} }
+/* minmax(0,1fr), not a bare 1fr: a grid track otherwise won't shrink below
+   its content's min-content width, and the Guide tab's unwrapped <pre>
+   command lines are wide enough to blow the whole page out to their width
+   and force horizontal scrolling on a phone even though the <pre> itself
+   already has its own overflow-x:auto. */
+@media (max-width:960px){ .layout{grid-template-columns:minmax(0,1fr);gap:var(--space-5);padding:var(--space-4)} }
 
 /* ---------- Stage ---------- */
 .stage-col{position:sticky;top:82px}
@@ -330,7 +335,7 @@ input[type=range]::-moz-range-progress{background:var(--accent);height:4px;borde
 .val{font-family:var(--display);letter-spacing:.04em;color:var(--accent);font-variant-numeric:tabular-nums;font-weight:500}
 hr.sep{border:0;border-top:1px solid var(--line);margin:var(--space-1) 0}
 
-:where(input,select,button,summary,a.btn):focus-visible{
+:where(input,select,button,summary,a.btn,.cue-row .t,.cue-row .x):focus-visible{
   outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent);
 }
 :where(.group-body input,.group-body select):focus-visible{border-color:var(--accent)}

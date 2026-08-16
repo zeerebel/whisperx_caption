@@ -110,6 +110,11 @@ function parseArgs(argv) {
 function validate(opts) {
   const transcript = path.resolve(opts.transcript);
   if (!fs.existsSync(transcript)) fail(`transcript not found: ${transcript}`);
+  // A typo'd path landing on a folder instead of the file inside it otherwise
+  // reaches page.setInputFiles() and fails there with a raw Playwright
+  // "Call log" dump instead of the one clear line every other bad-input case
+  // here gets.
+  if (!fs.statSync(transcript).isFile()) fail(`transcript is not a file: ${transcript}`);
   // The app (and this CLI, via the same #fileJson input) also accepts .srt/.vtt
   // — only .json transcripts are actual JSON, so only sanity-check those here.
   if (/\.json$/i.test(transcript)) {
@@ -137,6 +142,9 @@ function validate(opts) {
     fail(`--fps must be a positive integer (got "${opts.fps}")`);
 
   const out = path.resolve(opts.out ?? path.dirname(transcript));
+  // Otherwise mkdirSync's raw EEXIST throw in main() bypasses fail()'s clean
+  // one-liner in favor of a stack trace with syscall/errno noise.
+  if (fs.existsSync(out) && !fs.statSync(out).isDirectory()) fail(`--out is not a directory: ${out}`);
   return { ...opts, transcript, styleObj: style, out };
 }
 

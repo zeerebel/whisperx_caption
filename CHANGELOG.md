@@ -4,6 +4,81 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.14.0 — Trim export range, Screen Wake Lock, accessibility/mobile pass
+Two background agents ran in parallel (isolation risk noted and handled — see
+below), plus a Screen Wake Lock fix done directly. Every change verified with
+its own regression test; the full existing suite plus 10 new tests all pass.
+
+- **Added: trim the export to a time range.** Open thread #3 from v1.12.x —
+  "probably the single biggest lever for 'exports take too long' generically."
+  Two new fields on the Export tab, "Trim start" / "Trim end" (mm:ss.s or
+  plain seconds), default blank = the full clip (a true no-op for anyone who
+  doesn't touch them). All four export paths (PNG sequence, `.mov`, WebM,
+  single-frame PNG) now render only the trimmed range — frame 0 of an export
+  corresponds to the trim start, not absolute t=0. `computeCaptionBand` only
+  sizes the crop-band around cues that actually fall inside the trimmed
+  range, so a caption outside the export window doesn't inflate the strip. A
+  cue already playing at the trim boundary keeps rendering for its natural
+  remaining duration rather than being cut off. Composes with every existing
+  safety guard (the state.exporting checks, the WebM/4-GiB-zip memory
+  warnings, the bottom-edge clamp) since they all key off the same
+  now-trim-aware `frameCount`/duration values. Trim resets automatically when
+  a different transcript is loaded (a range from the old clip is almost
+  certainly wrong for the new one) but survives timing/grouping changes on
+  the same transcript. Not persisted to presets/localStorage — it's tied to a
+  specific transcript's timeline, not a reusable style choice.
+- **Added: Screen Wake Lock during export** — open thread #4. If the device's
+  screen locks/sleeps mid-export, JS execution pauses entirely until manually
+  woken, a different failure mode than tab-backgrounding (already mitigated
+  in v1.12.1) that would also explain an export left running overnight and
+  never finishing. `navigator.wakeLock` now holds the screen on for the
+  export's duration, released on completion/cancel/error, and re-acquired if
+  the tab is hidden then returns to the foreground (the spec auto-releases
+  the lock the instant a tab hides). Unsupported browsers no-op safely.
+- **Accessibility fixes**, found and fixed by an audit pass, each verified
+  with a real headless-Chromium keyboard-only walkthrough:
+  - The cue-editing strip was entirely mouse-only — the timestamp (seek) and
+    caption-text (edit) elements had click handlers but no way to reach or
+    activate them from the keyboard.
+  - Focus silently dropped to `<body>` after every cue edit (the strip
+    rebuilds from scratch on commit/cancel, destroying whatever had focus).
+  - Escape stopped cancelling the cue editor once focus moved to the Save
+    button via Tab (the handler only lived on the text input).
+  - The tab widget had the ARIA roles but no `aria-selected`/`aria-controls`/
+    `aria-labelledby`, so a screen reader couldn't tell which tab was open.
+  - Four controls had no accessible name at all: the "↺ revert" button
+    (icon-only, title-only) and the playback scrubber and custom chroma-key
+    color picker (no label source of any kind).
+- **Fixed: the Guide tab forced horizontal scroll on a phone.** `.layout`'s
+  mobile breakpoint used a bare `1fr` grid column, which CSS Grid will not
+  shrink below its widest descendant's min-content width — the Guide tab's
+  long `ffmpeg`/CLI command lines (already wrapped in their own
+  `overflow-x:auto` `<pre>`) blew the whole page out to ~1264px anyway. Fixed
+  with `minmax(0,1fr)`.
+- **CLI tool (`tools/render_export.mjs`) edge cases**: a directory passed as
+  the transcript path, or `--out` pointing at an existing non-directory file,
+  produced a raw Playwright/Node stack trace instead of the CLI's usual
+  clean one-line failure. Both now validated up front, matching every other
+  bad-input case in the file. (A broad re-check of other edge cases — empty
+  transcripts, malformed `--res`/`--fps`, the 65535-frame and 4-GiB zip caps,
+  re-running into a directory with existing output — found those already
+  handled correctly from prior rounds; see the audit's full report in this
+  session's history for the complete checked-and-solid list.)
+- **Known, deliberately unfixed**: small italic UI text over the live-preview
+  backdrop photo measures under WCAG AA contrast at some backdrop positions
+  (decorative only, not a control) — a real fix is a visual-design call on a
+  hand-crafted theme, flagged rather than unilaterally changed. Checkbox/
+  slider touch-target sizes are below the 24×24px guideline but are
+  pre-existing and identical on desktop, not a mobile-specific regression.
+- **Process note**: this batch was built by two background agents working in
+  the same live checkout at the same time (an export time-range feature and
+  an accessibility/mobile/CLI audit), which is not normally how this project
+  ships — a `git stash` incident occurred mid-flight from the resulting file
+  contention. Recovered cleanly (verified via full diff review + the entire
+  regression suite passing before merge) but confirms concurrent agents need
+  isolated worktrees, not a shared working directory, next time this pattern
+  is used.
+
 ## v1.13.0 — Multi-model audit round 2 (19 dimensions, adversarially verified)
 A fanned-out audit workflow reviewed the app across 19 dimensions (export
 correctness, parsing/data-integrity, presets, memory/perf, the CLI tool, and

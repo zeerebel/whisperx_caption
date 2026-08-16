@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.13.0";
+  const APP_VERSION = "1.14.0";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -94,6 +94,49 @@
   function exportRes() { const [w, h] = $("optRes").value.split("x").map(Number); return { w, h }; }
   function exportFps() { return +$("optFps").value; }
 
+  // Trim-range inputs accept the same "m:ss.s" shape fmt() displays elsewhere,
+  // or plain seconds. Empty -> null (caller falls back to the full clip); an
+  // unparseable string -> NaN so callers can tell "blank" from "typo".
+  function parseTimeInput(raw) {
+    const str = (raw || "").trim();
+    if (!str) return null;
+    const m = /^(\d+):([0-5]?\d(?:\.\d+)?)$/.exec(str);
+    if (m) return (+m[1]) * 60 + parseFloat(m[2]);
+    if (/^\d+(\.\d+)?$/.test(str)) return parseFloat(str);
+    return NaN;
+  }
+  // Single source of truth for the export trim range: clamps into
+  // [0, state.duration] and falls back to the full clip on anything that
+  // doesn't parse or doesn't make a valid (end > start) range — an export
+  // must never silently produce zero frames because of a typo here.
+  function readTrim() {
+    const s = parseTimeInput($("trimStart").value);
+    const e = parseTimeInput($("trimEnd").value);
+    const badFormat = Number.isNaN(s) || Number.isNaN(e);
+    let start = (s == null || badFormat) ? 0 : Math.max(0, Math.min(s, state.duration));
+    let end = (e == null || badFormat) ? state.duration : Math.max(0, Math.min(e, state.duration));
+    const invalid = !badFormat && (s != null || e != null) && !(end > start);
+    if (badFormat || invalid) { start = 0; end = state.duration; }
+    const active = start > 1e-6 || end < state.duration - 1e-6;
+    return { start, end, active, badFormat, invalid };
+  }
+  // Every exporter reads the trim through this so a bad range always warns
+  // once instead of quietly exporting the full clip with no explanation.
+  function trimForExport() {
+    const t = readTrim();
+    if (t.badFormat || t.invalid) toast("⚠️ Trim range invalid — exporting the full clip instead");
+    return t;
+  }
+  function updateTrimHint() {
+    const el = $("trimHint");
+    if (!el) return;
+    const t = readTrim();
+    if (t.badFormat) el.textContent = "⚠️ Could not read that time — use mm:ss.s (e.g. 1:30) or plain seconds.";
+    else if (t.invalid) el.textContent = `⚠️ End must be after start — exporting the full clip (${fmt(state.duration)}) instead.`;
+    else if (t.active) el.textContent = `Exporting ${fmt(t.start)} → ${fmt(t.end)} (${(t.end - t.start).toFixed(1)}s of ${fmt(state.duration)} total).`;
+    else el.textContent = "Export just part of the clip — leave both blank to export everything. Format mm:ss.s (e.g. 1:30) or plain seconds.";
+  }
+
   // ---------- fonts ----------
   const loadedGFonts = new Set();
   const gfontReady = new Map(); // family -> Promise that resolves when its stylesheet has loaded
@@ -180,6 +223,18 @@
       if (t >= state.cues[i].start && t <= state.cues[i].end) return i;
     return -1;
   }
+  // Nearest cue to t when nothing is active exactly at t: prefers the next
+  // cue at/after it, else falls back to the most recent one before it. Used
+  // by the single-frame export so a trimmed range's playhead lands on a
+  // caption that's actually IN the range instead of always cue 0.
+  function cueNear(t) {
+    let next = null, prev = null;
+    for (const c of state.cues) {
+      if (c.start >= t && (!next || c.start < next.start)) next = c;
+      if (c.end <= t && (!prev || c.end > prev.end)) prev = c;
+    }
+    return next || prev || null;
+  }
   function drawPreview() {
     const idx = cueIndexAt(state.t);           // one scan instead of cueAt + cueIndexAt
     const cue = idx >= 0 ? state.cues[idx] : null;
@@ -239,6 +294,7 @@
     renderCueStrip();
     drawPreview();
     updateTimeUI();
+    updateTrimHint();
     setExportEnabled(state.cues.length > 0);
   }
   let editingIndex = -1;
@@ -246,6 +302,16 @@
     const strip = $("cueStrip");
     strip.innerHTML = "";
     state.cues.forEach((c, i) => strip.appendChild(buildCueRow(c, i)));
+  }
+  // Space/Enter-activates a click handler on a non-form element the same way
+  // a real <button> would — needed because .t/.x are spans (styling reasons,
+  // matches surrounding rows), not buttons, so the browser gives them no
+  // built-in key activation. stopPropagation keeps Space from also hitting
+  // the document-level play/pause shortcut below.
+  function onActivateKey(el, fn) {
+    el.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); fn(e); }
+    });
   }
   function buildCueRow(c, i) {
     const row = document.createElement("div");
@@ -256,14 +322,24 @@
     t.className = "t";
     t.textContent = fmt(c.start);
     t.title = "Jump to this caption";
-    t.addEventListener("click", (e) => { e.stopPropagation(); seek(c.start + 0.01); });
+    t.tabIndex = 0;
+    t.setAttribute("role", "button");
+    t.setAttribute("aria-label", "Jump to this caption");
+    const jump = (e) => { e.stopPropagation(); seek(c.start + 0.01); };
+    t.addEventListener("click", jump);
+    onActivateKey(t, jump);
     row.appendChild(t);
 
     const x = document.createElement("span");
     x.className = "x";
     x.textContent = c.text;
     x.title = "Click to edit this line";
-    x.addEventListener("click", (e) => { e.stopPropagation(); enterEditMode(row, c, i); });
+    x.tabIndex = 0;
+    x.setAttribute("role", "button");
+    x.setAttribute("aria-label", "Edit this caption line");
+    const edit = (e) => { e.stopPropagation(); enterEditMode(row, c, i); };
+    x.addEventListener("click", edit);
+    onActivateKey(x, edit);
     row.appendChild(x);
 
     if (c.edited && c.original) {
@@ -275,6 +351,7 @@
       rev.className = "cue-revert";
       rev.textContent = "↺";
       rev.title = "Revert to the original transcription";
+      rev.setAttribute("aria-label", "Revert to the original transcription");
       rev.addEventListener("click", (e) => { e.stopPropagation(); revertCueEdit(c, i); });
       was.appendChild(rev);
       row.appendChild(was);
@@ -282,6 +359,16 @@
 
     row.addEventListener("click", () => seek(c.start + 0.01));
     return row;
+  }
+  // renderCueStrip() throws away and rebuilds every row, so whatever had
+  // keyboard focus inside the strip (a row, an editor's input/button) is
+  // destroyed with it and focus silently drops to <body> — jarring for a
+  // keyboard/screen-reader user mid-edit. Best-effort restore to the same
+  // row index (or the strip itself if the list is now empty/shorter).
+  function focusCueRow(i) {
+    const strip = $("cueStrip");
+    const row = strip.children[Math.min(i, strip.children.length - 1)];
+    if (row) (row.querySelector(".x") || row).focus();
   }
 
   // Click a line → edit it. The ORIGINAL transcription stays visible (dimmed,
@@ -319,14 +406,18 @@
     box.appendChild(origEl); box.appendChild(input); box.appendChild(actions);
     row.appendChild(box);
 
-    const commit = () => { editingIndex = -1; applyCueEdit(c, i, input.value); renderCueStrip(); };
-    const abort = () => { editingIndex = -1; renderCueStrip(); };
+    const commit = () => { editingIndex = -1; applyCueEdit(c, i, input.value); renderCueStrip(); focusCueRow(i); };
+    const abort = () => { editingIndex = -1; renderCueStrip(); focusCueRow(i); };
     save.addEventListener("click", (e) => { e.stopPropagation(); commit(); });
     cancel.addEventListener("click", (e) => { e.stopPropagation(); abort(); });
     box.addEventListener("click", (e) => e.stopPropagation()); // don't seek while editing
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); commit(); }
-      else if (e.key === "Escape") { e.preventDefault(); abort(); }
+    });
+    // Escape on the box (not just the input) so it also cancels from the
+    // Save/Cancel buttons — a Tab away from the input lands on Save first.
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); abort(); }
     });
     input.focus();
     input.setSelectionRange(0, input.value.length);
@@ -497,6 +588,10 @@
     try { state.model = WXC.parse(name, text); }
     catch (e) { return toast("⚠️ " + e.message); }
     editRuns.clear(); // stale edit originals belong to the previous transcript
+    // A trim range typed for the PREVIOUS transcript is almost certainly wrong
+    // for this one (different duration/content) — reset to the full clip
+    // rather than silently truncating a freshly loaded transcript.
+    $("trimStart").value = ""; $("trimEnd").value = "";
     const nw = state.model.words ? state.model.words.length : 0;
     const ns = state.model.segments ? state.model.segments.length : 0;
     $("srcInfo").textContent = nw
@@ -563,6 +658,28 @@
     btn.disabled = false;
     ["dlPngSeq", "dlPngFrame", "dlWebm", "dlMov", "playBtn"].forEach((id) => ($(id).disabled = b || !state.cues.length));
     $("fileJson").disabled = b; // loading a new transcript mid-export corrupts the run — see loadTranscriptText's guard
+    if (b) acquireWakeLock(); else releaseWakeLock();
+  }
+
+  // If the SCREEN locks/sleeps mid-export (distinct from the tab just being
+  // backgrounded, which the hidden-tab warning below already covers), JS
+  // execution pauses entirely until the device is manually woken — which
+  // would also explain an export that "ran overnight and never finished."
+  // navigator.wakeLock keeps the screen on for the export's duration; it is
+  // a nice-to-have (not universally supported, and the user can still
+  // override it at the OS level), so every failure here is swallowed.
+  let wakeLock = null;
+  async function acquireWakeLock() {
+    if (!("wakeLock" in navigator)) return;
+    try {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } catch (e) { wakeLock = null; } // e.g. denied, or the tab is already hidden
+  }
+  async function releaseWakeLock() {
+    if (!wakeLock) return;
+    try { await wakeLock.release(); } catch (e) {}
+    wakeLock = null;
   }
 
   // ---------- export cancellation ----------
@@ -623,12 +740,20 @@
   // stays trivial (a bottom-aligned strip keeps the frame's bottom edge).
   // Returns null when a band gives no real win (e.g. middle-aligned text that
   // spans most of the frame) → fall back to full.
-  function computeCaptionBand(style, anim, w, h) {
+  function computeCaptionBand(style, anim, w, h, trim) {
     if (!state.cues.length) return null;
     const meas = document.createElement("canvas").getContext("2d");
     const scale = h / 1080;
+    // With an active trim, only cues that actually appear inside it should
+    // size the band — a cue outside the exported range would otherwise
+    // inflate the strip for nothing. Overlap (not just cue.start) so a cue
+    // already playing at trim.start still counts.
+    const cues = trim && trim.active
+      ? state.cues.filter((c) => c.end >= trim.start && c.start <= trim.end)
+      : state.cues;
+    if (!cues.length) return null;
     let minY = Infinity, maxY = -Infinity;
-    for (const cue of state.cues) {
+    for (const cue of cues) {
       const L = WXC.render.layout(meas, cue, style, w, h, scale);
       if (!L.lines.length) continue;
       minY = Math.min(minY, L.blockTop);
@@ -695,7 +820,8 @@
   // animates (no intro effect, no karaoke/pill word color) is encoded once and
   // reused for its whole hold. `cached` tells the sink those bytes will be
   // needed again, so it must not consume them destructively.
-  async function renderExportFrames(w, h, fps, frameCount, style, anim, band, sink) {
+  async function renderExportFrames(w, h, fps, frameCount, style, anim, band, sink, t0) {
+    t0 = t0 || 0;
     const canvasH = band ? band.height : h;
     const yOff = band ? band.top : 0;
     const off = document.createElement("canvas");
@@ -726,7 +852,7 @@
     try {
       for (let i = 0; i < frameCount; i++) {
         checkCancel();
-        const t = i / fps;
+        const t = t0 + i / fps;
         while (ci < cues.length && cues[ci].end < t) ci++;
         const cue = ci < cues.length && t >= cues[ci].start ? cues[ci] : null;
         const name = `cap_${String(i).padStart(5, "0")}.png`;
@@ -758,7 +884,8 @@
     if (!state.cues.length || state.exporting) return;
     const { w, h } = exportRes();
     const fps = exportFps();
-    const frameCount = Math.max(1, Math.round(state.duration * fps));
+    const trim = trimForExport();
+    const frameCount = Math.max(1, Math.round((trim.end - trim.start) * fps));
     const zipName = `${baseName()}_${w}x${h}_${fps}fps_png.zip`;
 
     // ZIP entry count is a 16-bit field (store-only-zip.js MAX_ENTRIES = 65535)
@@ -812,7 +939,7 @@
     pause();
     await ensureFontsForExport(style, h);
     const cropWanted = !!($("optCropBand") && $("optCropBand").checked);
-    const band = cropWanted ? computeCaptionBand(style, anim, w, h) : null;
+    const band = cropWanted ? computeCaptionBand(style, anim, w, h, trim) : null;
     const canvasH = band ? band.height : h;
     const frames = [];
     const zw = writable ? WXC.zip.createZipStream((bytes) => writable.write(bytes)) : null;
@@ -821,7 +948,7 @@
       // so cached frames can be reused freely.
       await renderExportFrames(w, h, fps, frameCount, style, anim, band, (name, bytes) =>
         zw ? zw.add(name, bytes)
-           : void frames.push({ name, blob: new Blob([bytes], { type: "image/png" }) }));
+           : void frames.push({ name, blob: new Blob([bytes], { type: "image/png" }) }), trim.start);
       const placement = band
         ? `\nNOTE: these frames are a CROPPED caption strip — ${w}x${canvasH}px out of a ${w}x${h}\n` +
           `frame (rendered smaller so it exports fast and stays small).\n` +
@@ -835,6 +962,7 @@
         `fps: ${fps}\nframe size: ${w}x${canvasH}\n` +
         (band ? `full frame: ${w}x${h}\n` : ``) +
         `frames: ${frameCount}\n` +
+        (trim.active ? `trimmed range: ${fmt(trim.start)} to ${fmt(trim.end)} of ${fmt(state.duration)} total (frame 0 = ${fmt(trim.start)})\n` : ``) +
         placement +
         `\nImport as an image sequence and set the frame rate to ${fps}.\n` +
         `Premiere: File > Import > select cap_00000.png > tick "Image Sequence".\n` +
@@ -860,7 +988,10 @@
         : cropWanted
         ? ` — ${w}×${h} full frame (crop skipped — caption span too large to benefit)`
         : ` — ${w}×${h} full frame`;
-      $("exportProgress").textContent = `✓ ${frameCount} transparent frames exported${cropNote}`;
+      const trimNote = trim.active
+        ? ` — trimmed to ${fmt(trim.start)}–${fmt(trim.end)} (${(trim.end - trim.start).toFixed(1)}s of ${fmt(state.duration)})`
+        : ``;
+      $("exportProgress").textContent = `✓ ${frameCount} transparent frames exported${cropNote}${trimNote}`;
       toast("✓ PNG sequence exported");
     } catch (e) {
       reportExportError(e, "Export failed: ");
@@ -873,9 +1004,13 @@
   async function exportPngFrame() {
     if (!state.cues.length || state.exporting) return;
     const { w, h } = exportRes();
+    const trim = trimForExport();
     let t = state.t;
+    // With an active trim, a playhead left outside the trimmed range would
+    // otherwise export a frame the user didn't ask for.
+    if (trim.active && (t < trim.start || t > trim.end)) t = trim.start;
     let cue = cueAt(t);
-    if (!cue) { cue = state.cues[0]; t = (cue.start + cue.end) / 2; }
+    if (!cue) { cue = (trim.active && cueNear(t)) || state.cues[0]; t = (cue.start + cue.end) / 2; }
     const name = `${baseName()}_frame.png`;
     // Prompt for the save location first, while we still hold the click gesture.
     const handle = await pickSaveHandle(name, { "image/png": [".png"] });
@@ -900,6 +1035,8 @@
     if (typeof MediaRecorder === "undefined") return toast("⚠️ MediaRecorder not supported here");
     const { w, h } = exportRes();
     const fps = exportFps();
+    const trim = trimForExport();
+    const duration = trim.end - trim.start;
     const bg = bgColor() || "#000000";
     if (!bgColor())
       toast("Tip: WebM can't store alpha — set Background to a Solid color to key it out.");
@@ -908,9 +1045,9 @@
     // WHOLE clip only at stop(), so the entire encoded video sits in memory
     // for the full recording. Warn before that gets big enough to risk
     // crashing the tab (a 42-minute clip at this bitrate is ~3.8 GB).
-    const estBytes = (WEBM_BITRATE / 8) * state.duration;
+    const estBytes = (WEBM_BITRATE / 8) * duration;
     if (estBytes > 400 * 1024 * 1024 &&
-        !confirm(`This clip is ~${Math.round(state.duration)}s long and records in real time, holding an estimated ${(estBytes / 1e6).toFixed(0)} MB in memory until it finishes.\n\nTip: lower the resolution or record a shorter clip — or use the PNG sequence / .mov export instead, which do not hold the whole clip in memory at once. Continue?`))
+        !confirm(`This clip is ~${Math.round(duration)}s long and records in real time, holding an estimated ${(estBytes / 1e6).toFixed(0)} MB in memory until it finishes.\n\nTip: lower the resolution or record a shorter clip — or use the PNG sequence / .mov export instead, which do not hold the whole clip in memory at once. Continue?`))
       return;
     const webmName = `${baseName()}_${w}x${h}_chroma.webm`;
     const saveHandle = await pickSaveHandle(webmName, { "video/webm": [".webm"] });
@@ -941,12 +1078,13 @@
         function frame() {
           try {
             if (exportCancelled) { resolve(); return; }
-            const t = (performance.now() - startT) / 1000;
+            const elapsed = (performance.now() - startT) / 1000;
+            const t = trim.start + elapsed;
             rctx.fillStyle = bg; rctx.fillRect(0, 0, w, h);
             WXC.render.drawCaption(cctx, cueAt(t), style, t, w, h, anim);
             rctx.drawImage(cap, 0, 0);
-            $("exportProgress").textContent = `Recording ${t.toFixed(1)}s / ${state.duration.toFixed(1)}s…`;
-            if (t >= state.duration) { resolve(); return; }
+            $("exportProgress").textContent = `Recording ${elapsed.toFixed(1)}s / ${duration.toFixed(1)}s…`;
+            if (t >= trim.end) { resolve(); return; }
             requestAnimationFrame(frame);
           } catch (err) { reject(err); }
         }
@@ -956,7 +1094,10 @@
       await stopped;
       checkCancel(); // cancelled mid-recording → drop the partial capture
       await saveOrDownload(saveHandle, new Blob(chunks, { type: "video/webm" }), webmName);
-      $("exportProgress").textContent = "✓ WebM exported (opaque — key out the background)";
+      const trimNote = trim.active
+        ? ` — trimmed to ${fmt(trim.start)}–${fmt(trim.end)} (${duration.toFixed(1)}s of ${fmt(state.duration)})`
+        : ``;
+      $("exportProgress").textContent = `✓ WebM exported (opaque — key out the background)${trimNote}`;
       toast("✓ WebM exported");
     } catch (e) {
       reportExportError(e, "WebM export failed: ");
@@ -1068,7 +1209,8 @@
     if (!state.cues.length || state.exporting) return;
     const { w, h } = exportRes();
     const fps = exportFps();
-    const frameCount = Math.max(1, Math.round(state.duration * fps));
+    const trim = trimForExport();
+    const frameCount = Math.max(1, Math.round((trim.end - trim.start) * fps));
     const codecSel = ($("optMovCodec") && $("optMovCodec").value) || "qtrle";
     const codec = MOV_CODECS[codecSel] || MOV_CODECS.qtrle;
     // ProRes 4444 is far heavier in the wasm core, so warn much sooner for it
@@ -1102,7 +1244,7 @@
     const cropWanted = !!($("optCropBand") && $("optCropBand").checked);
     try {
       await ensureFontsForExport(style, h);
-      band = cropWanted ? computeCaptionBand(style, anim, w, h) : null;
+      band = cropWanted ? computeCaptionBand(style, anim, w, h, trim) : null;
       canvasH = band ? band.height : h;
       // ff.writeFile TRANSFERS the byte buffer into the worker (detaching it
       // on this side), so hand it a copy of any bytes the renderer will reuse
@@ -1111,7 +1253,7 @@
       await renderExportFrames(w, h, fps, frameCount, style, anim, band, async (name, bytes, cached) => {
         await ff.writeFile(name, cached ? bytes.slice() : bytes);
         names.push(name);
-      });
+      }, trim.start);
       $("exportProgress").textContent = `Encoding transparent .mov (${codec.label})…`;
       ffLogRing.length = 0;
       // A wedged encode would otherwise spin forever. Give it a budget that
@@ -1164,7 +1306,10 @@
         : cropWanted
         ? " — full frame (crop skipped — caption span too large to benefit)"
         : "";
-      $("exportProgress").textContent = `✓ Transparent .mov exported (${w}×${canvasH}, ${fps}fps, ${codec.label})${placeMsg}`;
+      const trimMsg = trim.active
+        ? ` — trimmed to ${fmt(trim.start)}–${fmt(trim.end)} (${(trim.end - trim.start).toFixed(1)}s of ${fmt(state.duration)})`
+        : "";
+      $("exportProgress").textContent = `✓ Transparent .mov exported (${w}×${canvasH}, ${fps}fps, ${codec.label})${placeMsg}${trimMsg}`;
       toast("✓ Transparent .mov exported");
     } catch (e) {
       if (e === CANCEL) reportExportError(e, "");
@@ -1435,8 +1580,21 @@
   function wireTabs() {
     const tabs = [...document.querySelectorAll(".tab")];
     const panels = [...document.querySelectorAll(".tabpanel")];
+    // role="tab"/"tablist"/"tabpanel" is already in the markup, but a screen
+    // reader still needs aria-selected (which one is open) and the
+    // controls/labelledby link between each button and its panel to announce
+    // this as a real tab widget instead of a set of unrelated buttons.
+    tabs.forEach((t) => {
+      t.id = "tabbtn-" + t.dataset.tab;
+      t.setAttribute("aria-controls", "tab-" + t.dataset.tab);
+      t.setAttribute("aria-selected", "false");
+    });
+    panels.forEach((p) => p.setAttribute("aria-labelledby", "tabbtn-" + p.dataset.panel));
     const activate = (key) => {
-      tabs.forEach((t) => t.classList.toggle("is-active", t.dataset.tab === key));
+      tabs.forEach((t) => {
+        t.classList.toggle("is-active", t.dataset.tab === key);
+        t.setAttribute("aria-selected", String(t.dataset.tab === key));
+      });
       panels.forEach((p) => p.classList.toggle("is-active", p.dataset.panel === key));
     };
     tabs.forEach((t) => t.addEventListener("click", () => {
@@ -1536,6 +1694,8 @@
     // so this file works with the CLI with no conversion step.
     $("dlStyleJson").addEventListener("click", () => download(baseName() + ".style.json", JSON.stringify(captureStyle(), null, 2), "application/json;charset=utf-8"));
     $("copyFfmpeg").addEventListener("click", copyFfmpeg);
+    $("trimStart").addEventListener("input", updateTrimHint);
+    $("trimEnd").addEventListener("input", updateTrimHint);
     $("exportCancel").addEventListener("click", () => {
       exportCancelled = true;
       $("exportCancel").disabled = true;
@@ -1601,12 +1761,16 @@
           $("exportProgress").textContent = progressBeforeHidden;
         progressBeforeHidden = null;
         toast("⚠️ Keep this tab visible — hidden tabs are throttled and the export slows to a crawl");
+        // The spec auto-releases a wake lock the instant the tab goes
+        // hidden; it must be re-requested by hand once it is visible again.
+        acquireWakeLock();
       }
     });
 
     // reflect any restored anim slider labels
     updateAnimLabels();
     resizePreview();
+    updateTrimHint();
   }
 
   function loadSample() {
