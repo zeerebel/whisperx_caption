@@ -132,6 +132,15 @@ own export.
 | Save the output somewhere specific | `--out C:\some\other\folder` |
 | See all the options again | `node tools/render_export.mjs --help` |
 
+**Long clips (40+ minutes) are automatically split into safe-sized chunks**
+and stitched back into one continuous frame sequence — you don't need to do
+anything for this, it just happens. You'll see `[chunk 1/3]`-style lines in
+the output instead of one continuous progress bar. This is the tool
+protecting itself against a real Chromium limitation on very long renders;
+the crop-to-caption-strip speed trick is turned off automatically for a
+chunked render (a clear on-screen note explains why), since each chunk can't
+know the ideal crop size for the whole clip on its own.
+
 Full example with everything:
 
 ```powershell

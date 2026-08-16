@@ -26,6 +26,18 @@
 //                          PATH the mux is skipped and the manual command is
 //                          printed — the PNG sequence is a complete deliverable
 //                          on its own.
+//   --chunk-frames N       for long exports the PNG-sequence render is
+//                          automatically split into chunks of at most N
+//                          frames (default 10000, ~7-8 min at 24-30fps) and
+//                          stitched back into one continuous frame sequence
+//                          -- the browser's in-memory zip fallback (used
+//                          here since there is no native save dialog to
+//                          automate) can otherwise fail deep into a genuinely
+//                          long single render. Auto-chunking forces crop-band
+//                          off (each chunk could otherwise get a different
+//                          band size). Raise this only if you have verified
+//                          a single render of that length completes reliably
+//                          on your machine.
 //   --help                 show this help
 //
 // Setup (once):  npm install   then   npx playwright install chromium
@@ -58,14 +70,14 @@ const MOV_CODECS = {
 function usage() {
   const src = fs.readFileSync(fileURLToPath(import.meta.url), "utf8");
   // The comment block at the top of this file IS the help text.
-  console.log(src.split("\n").slice(1, 34).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
+  console.log(src.split("\n").slice(1, 45).map((l) => l.replace(/^\/\/ ?/, "")).join("\n"));
 }
 
 // ---------- argument parsing ----------
 function parseArgs(argv) {
   const opts = {
     transcript: null, style: null, res: null, fps: null, crop: null,
-    out: null, mov: null,
+    out: null, mov: null, chunkFrames: null,
   };
   const args = [];
   for (const a of argv) {
@@ -86,6 +98,7 @@ function parseArgs(argv) {
     else if (a === "--crop") opts.crop = true;
     else if (a === "--no-crop") opts.crop = false;
     else if (a === "--out") opts.out = val();
+    else if (a === "--chunk-frames") opts.chunkFrames = val();
     else if (a === "--mov") {
       const next = args[i + 1];
       // Disambiguate by content, not by whether the positional transcript has
@@ -140,6 +153,8 @@ function validate(opts) {
     fail(`--res dimensions must be at least 2x2 (got "${opts.res}")`);
   if (opts.fps !== null && !(/^\d+$/.test(opts.fps) && +opts.fps > 0))
     fail(`--fps must be a positive integer (got "${opts.fps}")`);
+  if (opts.chunkFrames !== null && !(/^\d+$/.test(opts.chunkFrames) && +opts.chunkFrames >= 500))
+    fail(`--chunk-frames must be an integer >= 500 (got "${opts.chunkFrames}")`);
 
   const out = path.resolve(opts.out ?? path.dirname(transcript));
   // Otherwise mkdirSync's raw EEXIST throw in main() bypasses fail()'s clean
@@ -393,59 +408,152 @@ async function main() {
       fail(`could not load the font "${selectedFont}" (network unreachable?): ${relevantFailure}\nEvery frame would silently render in a fallback typeface instead of the styled look.`);
 
     // ---- run the PNG-sequence export, relaying the app's live progress ----
-    await page.click('.tab[data-tab="export"]');
-    const dlPromise = page.waitForEvent("download", { timeout: 0 });
-    dlPromise.catch(() => {}); // settled via the race below; avoid an unhandled rejection on failure
-    await page.click("#dlPngSeq");
-
-    let stopWatch = () => {};
-    const watch = new Promise((_, reject) => {
-      let last = "", lastChange = Date.now(), lastPrint = 0;
-      const iv = setInterval(async () => {
-        try {
-          const alert = await page.evaluate(() => window.__wxcAlert || null);
-          if (alert) return reject(new CliError(`export refused: ${alert.replace(/\s+/g, " ")}`));
-          const text = await progressText(page);
-          if (text && text !== last) {
-            last = text; lastChange = Date.now();
-            // phase lines print immediately; per-frame ETA lines at most every 2s
-            const phase = !/^Rendering frame/.test(text);
-            if (phase || Date.now() - lastPrint > 2000) { console.log("  " + text); lastPrint = Date.now(); }
-            if (/^⚠️|^Export failed|failed:|^Export cancelled/.test(text))
-              return reject(new CliError(`export failed in the app: ${text}`));
-          }
-          if (Date.now() - lastChange > 10 * 60 * 1000)
-            return reject(new CliError("export made no progress for 10 minutes — aborting"));
-        } catch { /* page busy or closing — skip this tick */ }
-      }, 500);
-      stopWatch = () => clearInterval(iv);
-    });
-    const download = await Promise.race([dlPromise, watch]).finally(() => stopWatch());
-
-    const zipName = download.suggestedFilename();
-    const zipPath = path.join(opts.out, zipName);
-    await download.saveAs(zipPath);
-    const doneLine = await page.waitForFunction(() => {
-      const t = document.getElementById("exportProgress").textContent;
-      return t.startsWith("✓") ? t : false;
-    }, { timeout: 60000 }).then((h) => h.jsonValue());
-
-    // ---- extract the frames next to the zip ----
-    const stem = zipName.replace(/\.zip$/, "").replace(/_png$/, "");
-    const framesDir = path.join(opts.out, `${stem}_frames`);
-    if (fs.existsSync(framesDir)) {
-      console.log(`Replacing existing ${framesDir}/`);
-      fs.rmSync(framesDir, { recursive: true, force: true }); // stale frames would leak into a re-mux
+    // Clicks dlPngSeq, waits for either a download or a failure signal
+    // (alert / progress-line error / 10-minute stall), saves the zip, and
+    // returns it unopened -- the caller decides where/whether to extract it.
+    // `label` prefixes every relayed progress line (used to distinguish
+    // chunks when auto-chunking is active; "" for a normal single export).
+    async function runOneExport(label) {
+      const dlPromise = page.waitForEvent("download", { timeout: 0 });
+      dlPromise.catch(() => {}); // settled via the race below; avoid an unhandled rejection on failure
+      await page.click("#dlPngSeq");
+      let stopWatch = () => {};
+      const watch = new Promise((_, reject) => {
+        let last = "", lastChange = Date.now(), lastPrint = 0;
+        const iv = setInterval(async () => {
+          try {
+            const alert = await page.evaluate(() => window.__wxcAlert || null);
+            if (alert) return reject(new CliError(`export refused: ${alert.replace(/\s+/g, " ")}`));
+            const text = await progressText(page);
+            if (text && text !== last) {
+              last = text; lastChange = Date.now();
+              // phase lines print immediately; per-frame ETA lines at most every 2s
+              const phase = !/^Rendering frame/.test(text);
+              if (phase || Date.now() - lastPrint > 2000) { console.log("  " + label + text); lastPrint = Date.now(); }
+              if (/^⚠️|^Export failed|failed:|^Export cancelled/.test(text))
+                return reject(new CliError(`export failed in the app: ${text}`));
+            }
+            if (Date.now() - lastChange > 10 * 60 * 1000)
+              return reject(new CliError("export made no progress for 10 minutes — aborting"));
+          } catch { /* page busy or closing — skip this tick */ }
+        }, 500);
+        stopWatch = () => clearInterval(iv);
+      });
+      const download = await Promise.race([dlPromise, watch]).finally(() => stopWatch());
+      const zipName = download.suggestedFilename();
+      const zipPath = path.join(opts.out, zipName);
+      await download.saveAs(zipPath);
+      const doneLine = await page.waitForFunction(() => {
+        const t = document.getElementById("exportProgress").textContent;
+        return t.startsWith("✓") ? t : false;
+      }, { timeout: 60000 }).then((h) => h.jsonValue());
+      return { zipName, zipPath, doneLine };
     }
-    fs.mkdirSync(framesDir, { recursive: true });
-    const names = await extractZip(zipPath, framesDir);
-    const frames = names.filter((n) => /^cap_\d{5}\.png$/.test(n)).sort();
-    if (!frames.length) fail(`the export zip contained no frames (${zipPath})`);
+
+    await page.click('.tab[data-tab="export"]');
+
+    // The browser-side "in-memory zip" fallback (used here since there is no
+    // native save dialog to automate) holds every rendered frame as a
+    // separate Blob until the WHOLE render finishes, then reads them all
+    // back at once to build the zip. Chromium's own blob storage is not
+    // guaranteed to keep tens of thousands of them valid for the many
+    // minutes a genuinely long (40+ minute) render takes -- confirmed
+    // empirically: a single-shot ~61,000-frame export reproducibly failed at
+    // ~93% completion with "The requested file could not be read... a
+    // reference to a file was acquired" (Chromium evicting a blob under
+    // sustained memory pressure), losing all rendered work, while chunks
+    // under ~12,000 frames completed reliably every time. Splitting a long
+    // export into safe-sized chunks via the trim-range feature (each
+    // producing its own small, reliable zip) and stitching the extracted
+    // frames back into one continuous sequence sidesteps the failure.
+    const CHUNK_FRAMES = opts.chunkFrames ? +opts.chunkFrames : 10000;
+    const totalSec = (() => {
+      const m = /^(\d+):([0-5]?\d(?:\.\d+)?)$/.exec(durText.trim());
+      return m ? (+m[1]) * 60 + parseFloat(m[2]) : NaN;
+    })();
+    const totalFrames = Number.isFinite(totalSec) ? Math.round(totalSec * Number(eff.fps)) : 0;
+    const chunked = totalFrames > CHUNK_FRAMES;
+
+    let zipName, zipPath, doneLine, framesDir, frames, stem, hadReadme = false;
+
+    if (!chunked) {
+      ({ zipName, zipPath, doneLine } = await runOneExport(""));
+
+      // ---- extract the frames next to the zip ----
+      stem = zipName.replace(/\.zip$/, "").replace(/_png$/, "");
+      framesDir = path.join(opts.out, `${stem}_frames`);
+      if (fs.existsSync(framesDir)) {
+        console.log(`Replacing existing ${framesDir}/`);
+        fs.rmSync(framesDir, { recursive: true, force: true }); // stale frames would leak into a re-mux
+      }
+      fs.mkdirSync(framesDir, { recursive: true });
+      const names = await extractZip(zipPath, framesDir);
+      frames = names.filter((n) => /^cap_\d{5}\.png$/.test(n)).sort();
+      if (!frames.length) fail(`the export zip contained no frames (${zipPath})`);
+      hadReadme = names.includes("README.txt");
+    } else {
+      const nChunks = Math.ceil(totalFrames / CHUNK_FRAMES);
+      if (eff.crop) {
+        console.log(`\nThis export is ${totalFrames} frames (${durText}) -- auto-splitting into ${nChunks} chunks of up to ${CHUNK_FRAMES} frames for reliability.`);
+        console.log("Crop-to-caption-band is forced OFF for this render: each chunk only sees its own slice of captions, so per-chunk band sizes would not line up into one consistent frame size.");
+        await setControl(page, "optCropBand", false);
+      } else {
+        console.log(`\nThis export is ${totalFrames} frames (${durText}) -- auto-splitting into ${nChunks} chunks of up to ${CHUNK_FRAMES} frames for reliability.`);
+      }
+
+      stem = `${path.basename(opts.transcript).replace(/\.[^.]+$/, "")}_${eff.res}_${eff.fps}fps`;
+      framesDir = path.join(opts.out, `${stem}_frames`);
+      if (fs.existsSync(framesDir)) {
+        console.log(`Replacing existing ${framesDir}/`);
+        fs.rmSync(framesDir, { recursive: true, force: true });
+      }
+      fs.mkdirSync(framesDir, { recursive: true });
+
+      let running = 0;
+      for (let c = 0; c < nChunks; c++) {
+        // A single division per boundary (frame count / fps), not
+        // c*(CHUNK_FRAMES/fps): multiplying an already-rounded quotient
+        // accumulates more floating-point error than dividing once, and the
+        // per-frame time this app renders at (t0 + i/fps, computed the same
+        // single-division way) needs to land on the same side of a cue's
+        // start/end boundary as an equivalent un-chunked render would -- a
+        // frame sampled a few ULPs off from its "real" time can otherwise
+        // flip in or out of a cue that starts almost exactly on that sample.
+        const chunkStart = (c * CHUNK_FRAMES) / Number(eff.fps);
+        const chunkEnd = Math.min(totalSec, ((c + 1) * CHUNK_FRAMES) / Number(eff.fps));
+        await setControl(page, "trimStart", String(chunkStart));
+        await setControl(page, "trimEnd", String(chunkEnd));
+        console.log(`\n[chunk ${c + 1}/${nChunks}] ${chunkStart.toFixed(1)}s - ${chunkEnd.toFixed(1)}s`);
+        const one = await runOneExport(`  [chunk ${c + 1}/${nChunks}] `);
+        doneLine = one.doneLine;
+        const chunkDir = path.join(opts.out, `${stem}_chunk${c}_tmp`);
+        fs.rmSync(chunkDir, { recursive: true, force: true });
+        fs.mkdirSync(chunkDir, { recursive: true });
+        const names = await extractZip(one.zipPath, chunkDir);
+        fs.rmSync(one.zipPath, { force: true }); // intermediate -- the merged frames dir is the deliverable
+        hadReadme = hadReadme || names.includes("README.txt");
+        const chunkFrames = names.filter((n) => /^cap_\d{5}\.png$/.test(n)).sort();
+        if (!chunkFrames.length) fail(`chunk ${c + 1}/${nChunks} produced no frames (${one.zipPath})`);
+        for (let i = 0; i < chunkFrames.length; i++) {
+          if (chunkFrames[i] !== `cap_${String(i).padStart(5, "0")}.png`)
+            fail(`chunk ${c + 1}/${nChunks} has a numbering gap at index ${i} (${chunkFrames[i]}) — a chunk zip may be corrupt`);
+          fs.renameSync(path.join(chunkDir, chunkFrames[i]), path.join(framesDir, `cap_${String(running + i).padStart(5, "0")}.png`));
+        }
+        running += chunkFrames.length;
+        fs.rmSync(chunkDir, { recursive: true, force: true });
+      }
+      await setControl(page, "trimStart", "");
+      await setControl(page, "trimEnd", "");
+      frames = fs.readdirSync(framesDir).filter((n) => /^cap_\d{5}\.png$/.test(n)).sort();
+      doneLine = `✓ ${frames.length} transparent frames exported across ${nChunks} auto-split chunks (no single zip kept -- see the frames directory below)`;
+      zipName = null; zipPath = null;
+    }
+
     for (let i = 0; i < frames.length; i++)
       if (frames[i] !== `cap_${String(i).padStart(5, "0")}.png`)
         fail(`frame numbering has a gap at index ${i} (${frames[i]}) — the zip may be corrupt`);
     const dim = pngSize(path.join(framesDir, frames[0]));
-    console.log(`Extracted ${frames.length} frames (${dim.w}x${dim.h})${names.includes("README.txt") ? " + README.txt" : ""} -> ${framesDir}/`);
+    console.log(`Extracted ${frames.length} frames (${dim.w}x${dim.h})${hadReadme ? " + README.txt" : ""} -> ${framesDir}/`);
 
     // ---- optional native-ffmpeg mux ----
     let movPath = null, movNote = null;
@@ -475,8 +583,8 @@ async function main() {
     // ---- summary ----
     console.log("\nDone in " + ((Date.now() - t0) / 1000).toFixed(1) + "s total.");
     console.log(`  ${doneLine}`);
-    console.log(`  zip:    ${zipPath}`);
-    console.log(`  frames: ${framesDir}${path.sep}cap_00000.png … cap_${String(frames.length - 1).padStart(5, "0")}.png  (import at ${eff.fps} fps${names.includes("README.txt") ? "; placement details in README.txt" : ""})`);
+    if (zipPath) console.log(`  zip:    ${zipPath}`);
+    console.log(`  frames: ${framesDir}${path.sep}cap_00000.png … cap_${String(frames.length - 1).padStart(5, "0")}.png  (import at ${eff.fps} fps${hadReadme ? "; placement details in README.txt" : ""})`);
     if (opts.mov) console.log(`  mov:    ${movPath ?? "(skipped)"}  ${movNote ? "— " + movNote : ""}`);
   } finally {
     await cleanup();
