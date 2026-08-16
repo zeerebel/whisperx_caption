@@ -4,6 +4,74 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.14.1 — Real-usage verification round: 5 fixes
+Ran the app the way its owner actually uses it (not another code audit) via
+three background verification agents: one (Fable) drove the real UI like a
+customer would — trying every preset, animation, export format, and editing
+flow, with visual evidence at each step; one composited the local CLI tool's
+output onto a real video with native ffmpeg and pixel-diffed it against the
+browser's own export (found nothing wrong with the tool itself — crop-band
+math, both `.mov` codecs, and the browser→CLI style hand-off all verified
+byte-for-byte correct); one tested real transcript shapes and a genuine
+42.5-minute clip to directly re-confirm the original 10-hour-stall complaint
+stays fixed at scale — and found a new, real failure mode specific to that
+scale (below). Five real issues found across the three agents, all fixed:
+- **Fixed: applying ANY caption-style preset silently reset the export's
+  resolution, FPS, crop-band, and codec to their defaults.** A real
+  regression from this session's own earlier v1.13.0 preset field-bleed fix
+  (`DEFAULT_STYLE` fallback in `applyPreset()`) — that fix correctly stopped
+  *visual* fields (margins, grouping, etc.) from bleeding between presets,
+  but it applied the same reset-to-default logic to `STYLE_KEYS`' *output*
+  fields too (`optRes`/`optFps`/`optCropBand`/`optMovCodec`/etc.), even
+  though no preset — built-in or user-saved — ever specifies them. The app's
+  own original code comment already stated presets should leave "export
+  resolution/fps and background mode untouched"; this restores that.
+  Concretely: pick Vertical 1080×1920 for a Shorts/Reels export, browse
+  presets to find a look, and the export would silently come back landscape
+  unless you noticed and reset it yourself. `applyPreset()` now explicitly
+  skips a dedicated `OUTPUT_KEYS` set — session persistence and the CLI
+  style.json handoff (which both still want the full field set) are
+  unaffected.
+- **Fixed: exporting a single-frame PNG with the playhead paused in a
+  silence gap always exported the clip's very FIRST caption**, regardless of
+  where the playhead actually was — `cueNear(t)` (added alongside the
+  trim-range feature to find the nearest cue) was only consulted when a trim
+  range was active; an ordinary un-trimmed gap always fell straight through
+  to `state.cues[0]`. Now used unconditionally.
+- **Added: a `beforeunload` warning when leaving the page with unsaved inline
+  caption edits.** Corrections made in the cue-editing strip are never
+  auto-saved anywhere; an accidental refresh or tab close used to throw that
+  work away with zero warning.
+- **Fixed: OpenAI `verbose_json` transcripts (`timestamp_granularities:
+  ["word","segment"]`) doubled every caption.** That shape puts word timing
+  in a top-level `words[]` parallel to `segments[]`, not nested inside each
+  segment — `parse.js` only ever set a segment's `hasWords` from its own
+  nested array, so every segment looked word-less and the v1.13.0
+  zero-word-segment fallback (correctly built for real word-less markers
+  like `[applause]`) fired for all of them anyway, on top of the real
+  word-grouped cues. Fixed by marking every segment `hasWords=true` once the
+  top-level array has actually been consumed as the file's sole source of
+  word timing (same fix covers the pre-existing flat `word_segments[]`
+  case, which had the identical latent bug, just never previously
+  exercised by a real transcript in this shape).
+- **Fixed: the local CLI tool (`tools/render_export.mjs`) could fail near
+  the finish line on a genuinely long (40+ minute) render, losing all
+  rendered work.** Root cause: the CLI always uses the browser's in-memory
+  zip fallback (there is no native save dialog to script), which holds every
+  rendered frame as a separate Blob until the whole render finishes, then
+  reads them all back at once. Chromium's blob storage is not guaranteed to
+  keep tens of thousands of them valid for the many minutes a long render
+  takes — reproduced empirically: a single-shot ~61,000-frame export failed
+  reproducibly at ~93% completion with a Chromium blob-eviction error, twice
+  in a row, while chunks under ~12,000 frames completed reliably every time.
+  The CLI now auto-splits any export over 10,000 frames (configurable via
+  `--chunk-frames`) into safe-sized chunks using the trim-range feature,
+  stitching the extracted frames back into one continuous, correctly-
+  numbered sequence — verified pixel-identical to an unchunked render of the
+  same clip. Crop-to-caption-band is forced off for a chunked render (each
+  chunk would otherwise see only its own slice of captions and could get a
+  different band size), with a clear on-screen note explaining why.
+
 ## v1.14.0 — Trim export range, Screen Wake Lock, accessibility/mobile pass
 Two background agents ran in parallel (isolation risk noted and handled — see
 below), plus a Screen Wake Lock fix done directly. Every change verified with

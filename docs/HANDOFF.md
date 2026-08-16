@@ -56,10 +56,51 @@ matrix, including error-path coverage (missing/invalid transcript, bad
   confirm which build is live.
 
 ## Current version state
-- **Live on main: v1.14.0** (#27→v1.12.0, #28→v1.12.1, #31→v1.12.2, #32→v1.12.3,
-  #33→CLI tool, →v1.12.4, →v1.13.0, →v1.14.0, all merged) — v1.12.1's live-ness
-  confirmed via a clean Cloudflare deploy log (see "Deploy pipeline was
-  silently landing stale builds" below).
+- **Live on main: v1.14.1** (#27→v1.12.0, #28→v1.12.1, #31→v1.12.2, #32→v1.12.3,
+  #33→CLI tool, →v1.12.4, →v1.13.0, →v1.14.0, →v1.14.1, all merged) —
+  v1.12.1's live-ness confirmed via a clean Cloudflare deploy log (see
+  "Deploy pipeline was silently landing stale builds" below).
+- **v1.14.1 — real-usage verification round.** Instead of another code audit,
+  three background agents actually USED the app the way its owner does: one
+  (Fable) drove the real UI end to end (presets, animations, every export
+  format, inline editing) with visual evidence at each step; one composited
+  the local CLI tool's rendered output onto a real video with native ffmpeg
+  and pixel-diffed it against the browser's own export — found zero
+  discrepancies, including in the crop-band math and the browser→CLI style
+  hand-off (417/417 frames byte-identical); one tested real transcript
+  shapes plus a genuine 42.5-minute clip to directly re-confirm the original
+  10-hour-stall complaint stays fixed at real scale — and found a new,
+  real, scale-specific failure mode in the CLI tool (see below). Five real
+  issues found, all fixed — full detail in CHANGELOG.md v1.14.1:
+  - A genuine regression from this session's own v1.13.0 preset field-bleed
+    fix (applying ANY preset was silently resetting export resolution/FPS/
+    crop/codec — the app's own original design comment says presets should
+    never touch those).
+  - A single-frame PNG export in a caption gap always exporting the video's
+    first caption instead of the nearest one.
+  - No warning before losing unsaved inline caption edits on an accidental
+    refresh.
+  - An OpenAI `verbose_json`-shaped transcript (top-level `words[]` parallel
+    to segments) doubled every caption — the same latent `hasWords`
+    computation bug as the flat `word_segments[]` case, just not previously
+    exercised by a real transcript in this specific shape.
+  - **The CLI tool could fail near the finish line on a genuinely long
+    (40+ minute) render, losing all rendered work** — reproduced twice in a
+    row on a real ~61,000-frame single-shot export (failed at ~93%
+    completion, a Chromium blob-storage eviction under sustained memory
+    pressure in the browser's in-memory zip fallback, which the CLI always
+    uses since there is no native save dialog to script). Fixed by
+    auto-chunking any export over 10,000 frames via the trim-range feature
+    and stitching the results back into one continuous sequence — verified
+    pixel-identical to an unchunked render on real (non-machine-regular)
+    timing data, and re-verified end to end on a real 18-minute/25,965-frame
+    chunked render (3 chunks, zero numbering gaps, ~6.3 minutes total).
+    See CHANGELOG.md v1.14.1 for the full mechanism and the `--chunk-frames`
+    flag this adds.
+  - **Process note**: two of the three verification agents hit an
+    account-level session rate limit mid-task; the incomplete one (the
+    long-transcript scale test) was resumed and completed — see its full
+    findings below and in CHANGELOG.md v1.14.1.
 - **v1.14.0 — export time-range trim, Screen Wake Lock, accessibility/mobile
   pass.** Closes **open thread #3** (trim export to a time range — now a
   first-class feature on the Export tab) and **open thread #4** (Screen Wake
@@ -372,11 +413,18 @@ Notes:
    this, a long clip would render for potentially hours before the .zip's hard
    4 GiB cap threw), and the same for the WebM export's real-time in-memory
    recording — but the underlying constraint (no streaming sink for those two
-   paths on non-Chromium browsers) is a warning, not a fix. Actually
-   eliminating the risk would mean either a streaming .zip encoder that
-   doesn't depend on `showSaveFilePicker`, or pushing those two paths through
-   the local CLI tool (`tools/render_export.mjs`) instead, which uses native
-   ffmpeg and never holds the whole clip in the browser's memory.
+   paths on non-Chromium browsers) is a warning, not a fix. A streaming .zip
+   encoder that doesn't depend on `showSaveFilePicker` would eliminate it
+   properly. **Correction to earlier guidance in this doc**: the local CLI
+   tool (`tools/render_export.mjs`) does NOT sidestep this — it also always
+   deletes `window.showSaveFilePicker` (no native dialog to automate
+   headlessly) and so hits the exact same in-memory Blob-accumulation path,
+   which v1.14.1 confirmed can fail outright near the end of a genuinely
+   long (40+ minute) render. v1.14.1's fix is CLI-side auto-chunking (via the
+   trim-range feature) rather than a change to the shared in-browser
+   fallback itself — see CHANGELOG.md v1.14.1. The in-browser (non-CLI)
+   in-memory fallback on Firefox/Safari is therefore still exactly this open
+   risk, unmitigated beyond the size warning.
 7. **Premium Cloud Transcribe** — full plan in `docs/PREMIUM_PLAN.md`, and a
    draft implementation exists in (closed, unmerged) PR #23 — Cloudflare
    Worker + Replicate WhisperX + a "Cloud Transcribe" panel, fully inert

@@ -51,8 +51,20 @@
     // WhisperX also emits a flat word_segments[]
     if (!words.length && Array.isArray(data.word_segments)) {
       for (const w of data.word_segments) pushWord(w.word !== undefined ? w.word : w.text, w.start, w.end);
+      // This flat array only ever gets consulted when no segment had its own
+      // nested words[] (the `!words.length` guard above), so it's the ONLY
+      // source of word timing for the whole file -- every segment with real
+      // text is therefore already represented in it. Without this, every
+      // segment's hasWords (set false in the loop above, since none had a
+      // nested words[]) would make buildCues also add its zero-word
+      // fallback cue, DUPLICATING every caption (once word-grouped, once as
+      // a whole-segment block).
+      if (words.length) for (const s of segments) s.hasWords = true;
     }
-    // Amoeba karaoke sidecar {words:[{t,d,w}]}
+    // OpenAI verbose_json (timestamp_granularities=["word","segment"]) puts
+    // word-level timing in a TOP-LEVEL words[] parallel to segments, not
+    // nested inside them -- same "sole source of truth" reasoning as above.
+    // Also covers the Amoeba karaoke sidecar {words:[{t,d,w}]} shape.
     if (!words.length && Array.isArray(data.words)) {
       for (const w of data.words) {
         if (w.t !== undefined) {
@@ -62,6 +74,7 @@
           pushWord(w.word !== undefined ? w.word : w.text, w.start, w.end);
         }
       }
+      if (words.length) for (const s of segments) s.hasWords = true;
     }
 
     fillMissingTimes(words);
