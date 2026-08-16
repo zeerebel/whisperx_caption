@@ -6,7 +6,7 @@
   const $ = (id) => document.getElementById(id);
 
   // Bump this on every change so the footer shows whether the deploy is current.
-  const APP_VERSION = "1.14.0";
+  const APP_VERSION = "1.14.1";
 
   const GFONTS = [
     "Inter", "Roboto", "Roboto Condensed", "Open Sans", "Lato", "Montserrat",
@@ -1010,7 +1010,11 @@
     // otherwise export a frame the user didn't ask for.
     if (trim.active && (t < trim.start || t > trim.end)) t = trim.start;
     let cue = cueAt(t);
-    if (!cue) { cue = (trim.active && cueNear(t)) || state.cues[0]; t = (cue.start + cue.end) / 2; }
+    // A playhead paused in a silence GAP (no trim involved at all) used to
+    // fall straight to cues[0] — exporting the video's very FIRST caption
+    // regardless of where the playhead actually was, instead of whichever
+    // caption is actually nearest.
+    if (!cue) { cue = cueNear(t) || state.cues[0]; t = (cue.start + cue.end) / 2; }
     const name = `${baseName()}_frame.png`;
     // Prompt for the save location first, while we still hold the click gesture.
     const handle = await pickSaveHandle(name, { "image/png": [".png"] });
@@ -1371,6 +1375,13 @@
     "optExportKaraoke", "optBgMode", "optChroma", "optChromaCustom", "optRes", "optFps", "optMovCodec",
     "optCropBand",
   ];
+  // Output/encoding settings, not part of a caption's LOOK — a preset picks a
+  // font/color/animation, never a resolution or codec. Still part of
+  // STYLE_KEYS (captureStyle/saveStyle/loadStyle need the full set for session
+  // persistence and the CLI style.json handoff), but applyPreset excludes
+  // them so switching presets can never change what resolution/fps/crop the
+  // user already had selected.
+  const OUTPUT_KEYS = new Set(["optExportKaraoke", "optBgMode", "optChroma", "optChromaCustom", "optRes", "optFps", "optMovCodec", "optCropBand"]);
   let DEFAULT_STYLE = {}; // set once in wire(), before loadStyle() restores the last session
   // Snapshot every style control into a plain object (the shape a preset stores).
   function captureStyle() {
@@ -1483,6 +1494,7 @@
   // grouping/margin/etc. fields across unrelated presets.
   function applyPreset(style) {
     STYLE_KEYS.forEach((id) => {
+      if (OUTPUT_KEYS.has(id)) return; // never touch resolution/fps/crop/codec/etc — see OUTPUT_KEYS above
       const v = style[id] !== undefined ? style[id] : DEFAULT_STYLE[id];
       if (v === undefined) return;
       const el = $(id); if (!el) return;
@@ -1765,6 +1777,15 @@
         // hidden; it must be re-requested by hand once it is visible again.
         acquireWakeLock();
       }
+    });
+
+    // Inline caption corrections are never auto-saved anywhere — an
+    // accidental refresh/close after fixing up a transcript by hand would
+    // otherwise throw that work away with zero warning.
+    window.addEventListener("beforeunload", (e) => {
+      if (!state.cues.some((c) => c.edited)) return;
+      e.preventDefault();
+      e.returnValue = "";
     });
 
     // reflect any restored anim slider labels

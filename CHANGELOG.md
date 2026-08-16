@@ -4,6 +4,43 @@ All notable changes to **WhisperX Caption Studio**. The app version is shown
 in the footer (`APP_VERSION` in `js/app.js`) so you can always tell which
 build a deploy is serving.
 
+## v1.14.1 — Real-usage verification round: 3 fixes
+Ran the app the way its owner actually uses it (not another code audit) via
+three background verification agents: one (Fable) drove the real UI like a
+customer would — trying every preset, animation, export format, and editing
+flow, with visual evidence at each step; one composited the local CLI tool's
+output onto a real video with native ffmpeg and pixel-diffed it against the
+browser's own export (found nothing — see below); one tested real transcript
+shapes and a genuine 40+ minute clip to directly confirm the original
+10-hour-stall complaint stays fixed at scale (results pending — see
+HANDOFF.md). The Fable-driven journey surfaced 3 real issues, all fixed:
+- **Fixed: applying ANY caption-style preset silently reset the export's
+  resolution, FPS, crop-band, and codec to their defaults.** A real
+  regression from this session's own earlier v1.13.0 preset field-bleed fix
+  (`DEFAULT_STYLE` fallback in `applyPreset()`) — that fix correctly stopped
+  *visual* fields (margins, grouping, etc.) from bleeding between presets,
+  but it applied the same reset-to-default logic to `STYLE_KEYS`' *output*
+  fields too (`optRes`/`optFps`/`optCropBand`/`optMovCodec`/etc.), even
+  though no preset — built-in or user-saved — ever specifies them. The app's
+  own original code comment already stated presets should leave "export
+  resolution/fps and background mode untouched"; this restores that.
+  Concretely: pick Vertical 1080×1920 for a Shorts/Reels export, browse
+  presets to find a look, and the export would silently come back landscape
+  unless you noticed and reset it yourself. `applyPreset()` now explicitly
+  skips a dedicated `OUTPUT_KEYS` set — session persistence and the CLI
+  style.json handoff (which both still want the full field set) are
+  unaffected.
+- **Fixed: exporting a single-frame PNG with the playhead paused in a
+  silence gap always exported the clip's very FIRST caption**, regardless of
+  where the playhead actually was — `cueNear(t)` (added alongside the
+  trim-range feature to find the nearest cue) was only consulted when a trim
+  range was active; an ordinary un-trimmed gap always fell straight through
+  to `state.cues[0]`. Now used unconditionally.
+- **Added: a `beforeunload` warning when leaving the page with unsaved inline
+  caption edits.** Corrections made in the cue-editing strip are never
+  auto-saved anywhere; an accidental refresh or tab close used to throw that
+  work away with zero warning.
+
 ## v1.14.0 — Trim export range, Screen Wake Lock, accessibility/mobile pass
 Two background agents ran in parallel (isolation risk noted and handled — see
 below), plus a Screen Wake Lock fix done directly. Every change verified with

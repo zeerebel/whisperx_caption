@@ -56,10 +56,32 @@ matrix, including error-path coverage (missing/invalid transcript, bad
   confirm which build is live.
 
 ## Current version state
-- **Live on main: v1.14.0** (#27→v1.12.0, #28→v1.12.1, #31→v1.12.2, #32→v1.12.3,
-  #33→CLI tool, →v1.12.4, →v1.13.0, →v1.14.0, all merged) — v1.12.1's live-ness
-  confirmed via a clean Cloudflare deploy log (see "Deploy pipeline was
-  silently landing stale builds" below).
+- **Live on main: v1.14.1** (#27→v1.12.0, #28→v1.12.1, #31→v1.12.2, #32→v1.12.3,
+  #33→CLI tool, →v1.12.4, →v1.13.0, →v1.14.0, →v1.14.1, all merged) —
+  v1.12.1's live-ness confirmed via a clean Cloudflare deploy log (see
+  "Deploy pipeline was silently landing stale builds" below).
+- **v1.14.1 — real-usage verification round.** Instead of another code audit,
+  three background agents actually USED the app the way its owner does: one
+  (Fable) drove the real UI end to end (presets, animations, every export
+  format, inline editing) with visual evidence at each step; one composited
+  the local CLI tool's rendered output onto a real video with native ffmpeg
+  and pixel-diffed it against the browser's own export — found zero
+  discrepancies, including in the crop-band math and the browser→CLI style
+  hand-off (417/417 frames byte-identical); one tested real transcript
+  shapes plus a genuine 40+ minute clip to directly re-confirm the original
+  10-hour-stall complaint stays fixed at real scale. The Fable-driven journey
+  found 3 real issues (all fixed — full detail in CHANGELOG.md v1.14.1): a
+  genuine regression from this session's own v1.13.0 preset field-bleed fix
+  (applying ANY preset was silently resetting export resolution/FPS/crop/
+  codec — the app's own original design comment says presets should never
+  touch those), a single-frame PNG export in a caption gap always exporting
+  the video's first caption instead of the nearest one, and no warning
+  before losing unsaved inline caption edits on an accidental refresh.
+  **Process note**: two of the three verification agents hit an
+  account-level session rate limit mid-task; the incomplete one (the
+  long-transcript scale test) was resumed and its findings are folded in
+  above/below once it reports back — see the open-thread note if this
+  section still says "pending" by the time you read it.
 - **v1.14.0 — export time-range trim, Screen Wake Lock, accessibility/mobile
   pass.** Closes **open thread #3** (trim export to a time range — now a
   first-class feature on the Export tab) and **open thread #4** (Screen Wake
