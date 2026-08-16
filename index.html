@@ -47,7 +47,7 @@
       <div class="transport">
         <button id="playBtn" class="btn play" type="button" aria-label="Play/Pause" disabled>▶</button>
         <span id="timeNow" class="time">0:00.0</span>
-        <input id="scrubber" class="scrubber" type="range" min="0" max="1000" value="0" step="1" disabled />
+        <input id="scrubber" class="scrubber" type="range" min="0" max="1000" value="0" step="1" disabled aria-label="Playback position" />
         <span id="timeTotal" class="time">0:00.0</span>
       </div>
 
@@ -250,7 +250,7 @@ whisperx "separated\htdemucs\$name\vocals.wav" --model large-v2 --language en --
               <option value="custom">Custom…</option>
             </select>
           </label>
-          <input id="optChromaCustom" type="color" value="#00ff00" class="hidden" />
+          <input id="optChromaCustom" type="color" value="#00ff00" class="hidden" aria-label="Custom chroma key color" />
           <input id="fileBg" type="file" accept="image/*" class="hidden" />
           <p class="hint">Transparent = true alpha, exported in the PNG sequence for overlaying in any editor. Solid color = for keying out an opaque video.</p>
         </div>
