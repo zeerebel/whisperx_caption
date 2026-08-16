@@ -261,6 +261,11 @@ whisperx "separated\htdemucs\$name\vocals.wav" --model large-v2 --language en --
         <div class="group-body">
           <p class="hint"><b>Overlay video</b> (with alpha) → PNG sequence. <b>Text captions</b> → SRT / VTT / ASS.</p>
           <div class="grid2">
+            <label>Trim start<input id="trimStart" type="text" inputmode="decimal" placeholder="0:00.0" /></label>
+            <label>Trim end<input id="trimEnd" type="text" inputmode="decimal" placeholder="full clip" /></label>
+          </div>
+          <p id="trimHint" class="hint">Export just part of the clip — leave both blank to export everything. Format mm:ss.s (e.g. 1:30) or plain seconds.</p>
+          <div class="grid2">
             <label>Resolution
               <select id="optRes">
                 <option value="1920x1080">1080p — 16:9</option>
